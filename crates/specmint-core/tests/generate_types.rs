@@ -200,15 +200,20 @@ inferred = true
     assert!(factories.contains("export function createAccountTypeEnum("));
     assert!(factories.contains("DeepPartial"));
     assert!(factories.contains("configureFaker"));
-    // Kubb v5: reseed at the start of every createX (identical first picks across factories).
-    assert!(factories.contains("faker.seed(2);"));
+    let seed_lines: Vec<&str> = factories
+        .lines()
+        .filter(|l| l.contains("faker.seed(2)"))
+        .collect();
+    assert_eq!(
+        seed_lines,
+        vec!["faker.seed(2);"],
+        "expected exactly one unindented, module-level faker.seed(2):\n{factories}"
+    );
+    let seed_offset = factories.find("faker.seed(2);").unwrap();
+    let first_factory_offset = factories.find("export function create").unwrap();
     assert!(
-        factories
-            .lines()
-            .filter(|l| l.trim() == "faker.seed(2);")
-            .count()
-            > 1,
-        "expected per-factory faker.seed(2), not only configureFaker"
+        seed_offset < first_factory_offset,
+        "faker.seed must run before any factory is defined:\n{factories}"
     );
     assert!(factories.contains("arrayOf(() =>"));
     assert!(factories.contains("min: 1, max: 3"));
@@ -607,5 +612,57 @@ enabled = false
     assert!(
         factories.contains("Object.assign") || factories.contains("first:"),
         "allOf factories should merge arms:\n{factories}"
+    );
+}
+
+#[test]
+fn zod_date_time_strings_use_a_valid_options_object() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("generated");
+    let cache = dir.path().join("cache");
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats.openapi.yaml");
+
+    let config_path = dir.path().join("specmint.toml");
+    let toml = format!(
+        r#"
+[source]
+path = "{fixture}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+clean = true
+
+[emitters.zod]
+enabled = true
+file = "zod.ts"
+"#,
+        fixture = fixture.display(),
+        cache = cache.display(),
+        out = out.display(),
+    )
+    .replace('\\', "/");
+    std::fs::write(&config_path, toml).unwrap();
+
+    generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        mode: None,
+        emitter_filter: None,
+        force: true,
+        write_schema: None,
+    })
+    .unwrap();
+
+    let zod = std::fs::read_to_string(out.join("zod.ts")).unwrap();
+    assert!(
+        zod.contains("startsAt: z.string().datetime({ offset: true })"),
+        "date-time should use a single-brace options object:\n{zod}"
+    );
+    assert!(
+        !zod.contains("{{"),
+        "zod output must not contain doubled braces:\n{zod}"
     );
 }
