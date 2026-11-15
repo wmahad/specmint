@@ -1409,6 +1409,10 @@ components:
   schemas:
     Flag:
       type: [boolean, "null"]
+    Settings:
+      type: object
+      properties:
+        enabled: { type: boolean, nullable: true }
 "#,
         "[plugins.factories]\nenabled = true\n",
     );
@@ -1419,6 +1423,12 @@ components:
     assert!(
         factories.contains(
             "  return overrides === undefined ? defaults : applyOverrides<Flag>(defaults, overrides);"
+        ),
+        "{factories}"
+    );
+    assert!(
+        factories.contains(
+            "  return overrides === undefined ? defaults : applyOverrides<Settings>(defaults, overrides);"
         ),
         "{factories}"
     );
