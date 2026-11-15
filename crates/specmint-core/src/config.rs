@@ -146,19 +146,6 @@ fn default_banner() -> String {
 pub struct AdapterConfig {
     #[serde(default = "default_true")]
     pub validate: bool,
-    #[serde(default = "default_discriminator")]
-    pub discriminator: String,
-    #[serde(default = "default_enum_suffix")]
-    pub enum_suffix: String,
-}
-
-fn default_discriminator() -> String {
-    "propagate".into()
-}
-
-fn default_enum_suffix() -> String {
-    // Kubb config uses a single space to avoid `FooEnumEnum` doubling.
-    " ".into()
 }
 
 impl Default for AdapterConfig {
@@ -167,16 +154,16 @@ impl Default for AdapterConfig {
             // On by default: catches duplicate ids / broken $refs / path-param gaps
             // before plugins produce confusing TS.
             validate: true,
-            discriminator: default_discriminator(),
-            enum_suffix: default_enum_suffix(),
         }
     }
 }
 
-/// Config-owned naming policy (inversion of control).
+/// Naming rules shared by every plugin: schema, enum-member and operation
+/// names, plus overrides for them.
 ///
 /// Plugins never hardcode casing — they ask [`crate::naming::Naming`], which
-/// applies these kind rules + regex overrides.
+/// applies these kind rules + regex overrides. Names that only one plugin
+/// writes are configured in that plugin's section of `plugins`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NamingConfig {
@@ -189,12 +176,6 @@ pub struct NamingConfig {
     /// OperationId → auxiliary type base (`ListPets` → `ListPetsQueryParams`).
     #[serde(default = "IdentNamingRule::operation_default")]
     pub operation: IdentNamingRule,
-    #[serde(default = "AffixNamingRule::factory_default")]
-    pub factory: AffixNamingRule,
-    #[serde(default = "AffixNamingRule::handler_default")]
-    pub handler: AffixNamingRule,
-    #[serde(default = "AffixNamingRule::zod_default")]
-    pub zod: AffixNamingRule,
     #[serde(default)]
     pub overrides: Vec<NamingOverride>,
 
@@ -203,28 +184,10 @@ pub struct NamingConfig {
     schema_case: Option<CaseStyle>,
     #[serde(default)]
     operation_case: Option<CaseStyle>,
-    #[serde(default)]
-    factory_prefix: Option<String>,
-    #[serde(default)]
-    handler_case: Option<CaseStyle>,
-    #[serde(default)]
-    handler_suffix: Option<String>,
 }
 
 fn default_pascal() -> CaseStyle {
     CaseStyle::PascalCase
-}
-
-fn default_factory_prefix() -> String {
-    "create".into()
-}
-
-fn default_handler_suffix() -> String {
-    "Handler".into()
-}
-
-fn default_zod_suffix() -> String {
-    "Schema".into()
 }
 
 impl Default for NamingConfig {
@@ -233,15 +196,9 @@ impl Default for NamingConfig {
             schema: IdentNamingRule::schema_default(),
             enum_member: EnumMemberNamingRule::default(),
             operation: IdentNamingRule::operation_default(),
-            factory: AffixNamingRule::factory_default(),
-            handler: AffixNamingRule::handler_default(),
-            zod: AffixNamingRule::zod_default(),
             overrides: Vec::new(),
             schema_case: None,
             operation_case: None,
-            factory_prefix: None,
-            handler_case: None,
-            handler_suffix: None,
         }
     }
 }
@@ -254,15 +211,6 @@ impl NamingConfig {
         }
         if let Some(c) = self.operation_case.take() {
             self.operation.case = c;
-        }
-        if let Some(p) = self.factory_prefix.take() {
-            self.factory.prefix = p;
-        }
-        if let Some(c) = self.handler_case.take() {
-            self.handler.case = c;
-        }
-        if let Some(s) = self.handler_suffix.take() {
-            self.handler.suffix = s;
         }
         self
     }
@@ -321,7 +269,8 @@ impl IdentNamingRule {
     }
 }
 
-/// Factory / handler / zod style: affix around a cased base name.
+/// Affix around a cased base name. Plugins use it for the names they own,
+/// each with its own defaults.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AffixNamingRule {
@@ -344,30 +293,6 @@ impl Default for AffixNamingRule {
 }
 
 impl AffixNamingRule {
-    pub fn factory_default() -> Self {
-        Self {
-            case: CaseStyle::PascalCase,
-            prefix: default_factory_prefix(),
-            suffix: String::new(),
-        }
-    }
-
-    pub fn handler_default() -> Self {
-        Self {
-            case: CaseStyle::CamelCase,
-            prefix: String::new(),
-            suffix: default_handler_suffix(),
-        }
-    }
-
-    pub fn zod_default() -> Self {
-        Self {
-            case: CaseStyle::CamelCase,
-            prefix: String::new(),
-            suffix: default_zod_suffix(),
-        }
-    }
-
     pub fn apply_patch(&self, patch: &AffixNamingPatch) -> Self {
         Self {
             case: patch.case.unwrap_or(self.case),
@@ -451,20 +376,11 @@ pub struct NamingOverride {
     #[serde(default)]
     pub rename: Option<String>,
     #[serde(default)]
-    pub enum_style: Option<EnumStyle>,
-    /// Per-schema object declaration style (`type` | `interface`).
-    #[serde(default)]
-    pub syntax: Option<ObjectSyntax>,
-    #[serde(default)]
     pub schema: Option<IdentNamingPatch>,
     #[serde(default)]
     pub enum_member: Option<EnumMemberNamingPatch>,
     #[serde(default)]
     pub operation: Option<IdentNamingPatch>,
-    #[serde(default)]
-    pub factory: Option<AffixNamingPatch>,
-    #[serde(default)]
-    pub handler: Option<AffixNamingPatch>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -508,14 +424,6 @@ pub enum OverrideKind {
     OperationId,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum EnumStyle {
-    Enum,
-    Literal,
-    AsConst,
-}
-
 /// The `plugins` table: one section per plugin, keyed by plugin name.
 ///
 /// Core does not know what a section holds. Each plugin reads its own with
@@ -554,17 +462,6 @@ impl PluginsConfig {
                 Error::config(format!("plugins.{name}{at}: {}", e.inner()))
             })
     }
-}
-
-/// Top-level declaration style for object-like schemas.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ObjectSyntax {
-    /// `export type Foo = { … }` (Kubb-compatible default).
-    #[default]
-    Type,
-    /// `export interface Foo { … }` when the schema is a non-nullable object.
-    Interface,
 }
 
 impl Config {

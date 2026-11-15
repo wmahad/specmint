@@ -17,6 +17,7 @@ use crate::naming::Naming;
 use crate::plugins::cycles::{
     CycleKind, RefGraph, property_cycle_kind, resolve_ref_name, schema_is_array,
 };
+use crate::plugins::factories::FactoryNames;
 
 /// Context for nested factory expression generation.
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +26,7 @@ pub struct FakerCtx<'a> {
     pub root_schema: Option<&'a str>,
     pub graph: &'a RefGraph,
     pub circular: &'a IndexSet<String>,
+    pub factory_names: &'a FactoryNames,
 }
 
 impl<'a> FakerCtx<'a> {
@@ -32,11 +34,13 @@ impl<'a> FakerCtx<'a> {
         root_schema: Option<&'a str>,
         graph: &'a RefGraph,
         circular: &'a IndexSet<String>,
+        factory_names: &'a FactoryNames,
     ) -> Self {
         Self {
             root_schema,
             graph,
             circular,
+            factory_names,
         }
     }
 }
@@ -56,7 +60,7 @@ pub fn faker_expr(
             if ctx.root_schema == Some(resolved) {
                 return "undefined as never".into();
             }
-            ref_factory_call(name, naming, schemas)
+            ref_factory_call(name, naming, schemas, ctx.factory_names)
         }
         SchemaNode::Primitive {
             primitive,
@@ -80,7 +84,7 @@ pub fn faker_expr(
                     if ctx.root_schema == Some(resolved) {
                         return "[]".into();
                     }
-                    ref_factory_call(name, naming, schemas)
+                    ref_factory_call(name, naming, schemas, ctx.factory_names)
                 }
                 other => faker_expr(other, naming, schemas, ctx),
             };
@@ -244,7 +248,7 @@ fn faker_union_expr(
             if ctx.root_schema == Some(resolved) {
                 return "undefined as never".into();
             }
-            return ref_factory_call(name, naming, schemas);
+            return ref_factory_call(name, naming, schemas, ctx.factory_names);
         }
         let factories: Vec<String> = if let Some(disc) = discriminator {
             let mut out = Vec::new();
@@ -257,7 +261,7 @@ fn faker_union_expr(
                     continue;
                 }
                 seen.insert(schema_name.as_str());
-                let call = ref_factory_call(schema_name, naming, schemas);
+                let call = ref_factory_call(schema_name, naming, schemas, ctx.factory_names);
                 let ty = naming.schema_type_name(schema_name);
                 let lit = value.replace('\\', "\\\\").replace('\'', "\\'");
                 out.push(format!(
@@ -274,7 +278,7 @@ fn faker_union_expr(
                 }
                 out.push(format!(
                     "() => ({})",
-                    ref_factory_call(name, naming, schemas)
+                    ref_factory_call(name, naming, schemas, ctx.factory_names)
                 ));
             }
             out
@@ -282,7 +286,12 @@ fn faker_union_expr(
             ref_names
                 .iter()
                 .filter(|name| ctx.root_schema != Some(resolve_ref_name(name, schemas)))
-                .map(|name| format!("() => ({})", ref_factory_call(name, naming, schemas)))
+                .map(|name| {
+                    format!(
+                        "() => ({})",
+                        ref_factory_call(name, naming, schemas, ctx.factory_names)
+                    )
+                })
                 .collect()
         };
         if factories.is_empty() {
@@ -298,12 +307,17 @@ fn faker_union_expr(
 }
 
 /// `createFoo(...)` — enums take only an optional value; objects take overrides.
-fn ref_factory_call(schema_name: &str, naming: &Naming, schemas: &SchemaMap) -> String {
+fn ref_factory_call(
+    schema_name: &str,
+    naming: &Naming,
+    schemas: &SchemaMap,
+    factory_names: &FactoryNames,
+) -> String {
     let ty = naming.schema_type_name(schema_name);
-    let factory = naming.factory_name(&ty);
+    let factory = factory_names.name(&ty);
     match schemas.get(schema_name) {
         Some(SchemaNode::Enum { .. }) => format!("{factory}()"),
-        Some(SchemaNode::Ref { name }) => ref_factory_call(name, naming, schemas),
+        Some(SchemaNode::Ref { name }) => ref_factory_call(name, naming, schemas, factory_names),
         _ => format!("{factory}()"),
     }
 }

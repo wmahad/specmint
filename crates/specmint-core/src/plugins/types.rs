@@ -11,9 +11,9 @@ use crate::adapter::{
 };
 use serde::Deserialize;
 
-use crate::config::{CaseStyle, Config, EnumStyle, ObjectSyntax};
+use crate::config::{CaseStyle, Config, OverrideKind, OverrideMatch};
 use crate::error::Result;
-use crate::naming::{Naming, to_case};
+use crate::naming::{Naming, Override, OverrideSet, to_case};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 
 pub struct TypesPlugin;
@@ -36,6 +36,72 @@ pub struct TypesOptions {
     pub strip_readonly: bool,
     #[serde(default = "default_true")]
     pub compact: bool,
+    /// Per-schema `enum_style` / `syntax`, matched by schema name.
+    #[serde(default)]
+    pub overrides: Vec<TypesOverride>,
+}
+
+/// How enum schemas are declared.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EnumStyle {
+    Enum,
+    Literal,
+    AsConst,
+}
+
+/// Top-level declaration style for object-like schemas.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectSyntax {
+    /// `export type Foo = { … }`, the default.
+    #[default]
+    Type,
+    /// `export interface Foo { … }` when the schema is a non-nullable object.
+    Interface,
+}
+
+/// `[[plugins.types.overrides]]`: a different enum style or object syntax for
+/// the schemas whose name matches.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypesOverride {
+    #[serde(rename = "match")]
+    pub target: OverrideMatch,
+    #[serde(default)]
+    pub enum_style: Option<EnumStyle>,
+    #[serde(default)]
+    pub syntax: Option<ObjectSyntax>,
+}
+
+impl Override for TypesOverride {
+    fn target(&self) -> &OverrideMatch {
+        &self.target
+    }
+}
+
+/// The enum style and object syntax for each schema, after overrides.
+#[derive(Debug)]
+pub struct TypeStyles {
+    enum_style: EnumStyle,
+    syntax: ObjectSyntax,
+    overrides: OverrideSet<TypesOverride>,
+}
+
+impl TypeStyles {
+    pub fn enum_style(&self, schema_name: &str) -> EnumStyle {
+        self.overrides
+            .matching(OverrideKind::SchemaName, schema_name)
+            .find_map(|ovr| ovr.enum_style)
+            .unwrap_or(self.enum_style)
+    }
+
+    pub fn syntax(&self, schema_name: &str) -> ObjectSyntax {
+        self.overrides
+            .matching(OverrideKind::SchemaName, schema_name)
+            .find_map(|ovr| ovr.syntax)
+            .unwrap_or(self.syntax)
+    }
 }
 
 fn default_true() -> bool {
@@ -59,6 +125,7 @@ impl Default for TypesOptions {
             syntax: ObjectSyntax::Type,
             strip_readonly: true,
             compact: true,
+            overrides: Vec::new(),
         }
     }
 }
@@ -66,6 +133,14 @@ impl Default for TypesOptions {
 impl TypesOptions {
     pub fn from_config(config: &Config) -> Result<Self> {
         config.plugins.section_or_default(TypesPlugin.name())
+    }
+
+    pub fn styles(&self) -> Result<TypeStyles> {
+        Ok(TypeStyles {
+            enum_style: self.enum_style,
+            syntax: self.syntax,
+            overrides: OverrideSet::new(self.overrides.clone(), "plugins.types.overrides")?,
+        })
     }
 
     /// How other generated files import the types file.
@@ -175,11 +250,12 @@ impl Plugin for TypesPlugin {
 
 fn render_types(spec: &ParsedSpec, naming: &Naming, types_cfg: &TypesOptions) -> Result<String> {
     let mut out = String::new();
+    let styles = types_cfg.styles()?;
 
     for (name, schema) in &spec.schemas {
         let type_name = naming.schema_type_name(name);
-        let enum_style = naming.enum_style_for_schema(name, types_cfg.enum_style);
-        let syntax = naming.object_syntax_for_schema(name, types_cfg.syntax);
+        let enum_style = styles.enum_style(name);
+        let syntax = styles.syntax(name);
         write_declaration(
             &mut out,
             name,
