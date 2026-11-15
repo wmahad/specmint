@@ -67,8 +67,8 @@ async function downloadViaApi(version, nodeFile, headers) {
 }
 
 async function main() {
-  // Source checkout — build locally instead of downloading.
-  if (existsSync(path.join(rootDir, "Cargo.toml"))) {
+  // Source checkout (the monorepo): build locally instead of downloading.
+  if (existsSync(path.join(rootDir, "../../crates/specmint-napi/Cargo.toml"))) {
     return;
   }
 

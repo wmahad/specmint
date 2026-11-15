@@ -1,0 +1,12 @@
+{
+  "name": "crate-specmint-napi",
+  "private": true,
+  "description": "Turborepo wrapper for the specmint-napi Rust crate. Not published.",
+  "scripts": {
+    "test": "cargo test -p specmint-napi",
+    "lint": "cargo clippy -p specmint-napi --all-targets -- -D warnings"
+  },
+  "dependencies": {
+    "crate-specmint-core": "workspace:*"
+  }
+}

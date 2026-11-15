@@ -2,12 +2,17 @@
 target/
 
 # napi build output
-*.node
-index.js
-index.d.ts
+packages/specmint/*.node
+packages/specmint/index.js
+packages/specmint/index.d.ts
 
-# Node
+# Copied into the package by prepack
+packages/specmint/README.md
+packages/specmint/LICENSE
+
+# Node and Turborepo
 node_modules/
+.turbo/
 
 # Spec fetch cache and generated output
 .cache/
