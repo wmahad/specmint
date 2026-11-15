@@ -20,7 +20,7 @@ use crate::naming::Naming;
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 use crate::plugins::cycles::{build_ref_graph, find_circular_names};
 use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
-use crate::plugins::types::TypesOptions;
+use crate::plugins::types::{OperationTypeNames, TypesOptions};
 
 pub struct FactoriesPlugin;
 
@@ -58,6 +58,16 @@ impl FactoriesOptions {
     pub fn from_config(config: &Config) -> Result<Self> {
         config.plugins.section_or_default(FactoriesPlugin.name())
     }
+
+    /// How other generated files import the factories file.
+    pub fn import_path(&self) -> String {
+        super::relative_import(&self.file)
+    }
+}
+
+/// The name of the factory that builds `type_name` (`createPet`).
+pub fn factory_name(naming: &Naming, type_name: &str) -> String {
+    naming.factory_name(type_name)
 }
 
 impl Plugin for FactoriesPlugin {
@@ -96,7 +106,7 @@ impl Plugin for FactoriesPlugin {
 fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
-    let types_file = types_import_path(&TypesOptions::from_config(ctx.config)?.file);
+    let types_file = TypesOptions::from_config(ctx.config)?.import_path();
     let schemas: &SchemaMap = &spec.schemas;
     let graph = build_ref_graph(schemas);
     let circular = find_circular_names(&graph);
@@ -112,18 +122,12 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
         type_names.insert(naming.schema_type_name(name));
     }
     for operation in &spec.operations {
-        let type_base = naming.operation_type_base(&operation.operation_id);
-        for (status_code, _) in &operation.responses {
-            type_names.insert(format!("{type_base}{status_code}"));
+        let names = OperationTypeNames::new(naming, operation);
+        for status_code in operation.responses.keys() {
+            type_names.insert(names.response(status_code));
         }
-        if operation.responses.keys().any(|code| code.starts_with('2')) {
-            let alias = success_alias(&operation.method);
-            type_names.insert(format!("{type_base}{alias}"));
-        }
-        if operation.request_body.is_some() {
-            let kind = request_kind(&operation.method);
-            type_names.insert(format!("{type_base}{kind}"));
-        }
+        type_names.extend(names.success_response());
+        type_names.extend(names.request());
     }
 
     let mut out = String::new();
@@ -140,10 +144,10 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
 
     for (schema_name, schema) in schemas {
         let type_name = naming.schema_type_name(schema_name);
-        let factory_name = naming.factory_name(&type_name);
+        let factory = factory_name(naming, &type_name);
         write_schema_factory(
             &mut out,
-            &factory_name,
+            &factory,
             &type_name,
             Some(schema_name.as_str()),
             schema,
@@ -153,44 +157,31 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
     }
 
     for operation in &spec.operations {
-        let type_base = naming.operation_type_base(&operation.operation_id);
+        let names = OperationTypeNames::new(naming, operation);
         for (status_code, schema) in &operation.responses {
-            let type_name = format!("{type_base}{status_code}");
-            let factory_name = naming.factory_name(&type_name);
-            write_schema_factory(
-                &mut out,
-                &factory_name,
-                &type_name,
-                None,
-                schema,
-                &write_ctx,
-            )?;
+            let type_name = names.response(status_code);
+            let factory = factory_name(naming, &type_name);
+            write_schema_factory(&mut out, &factory, &type_name, None, schema, &write_ctx)?;
             out.push('\n');
         }
-        if let Some((status_code, _)) = operation
-            .responses
-            .iter()
-            .find(|(code, _)| code.starts_with('2'))
+        if let (Some(type_name), Some(status_code)) =
+            (names.success_response(), names.success_status())
         {
-            let alias = success_alias(&operation.method);
-            let type_name = format!("{type_base}{alias}");
-            let factory_name = naming.factory_name(&type_name);
-            let status_factory = naming.factory_name(&format!("{type_base}{status_code}"));
+            let factory = factory_name(naming, &type_name);
+            let status_factory = factory_name(naming, &names.response(status_code));
             let _ = writeln!(
                 out,
-                "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
+                "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
             let _ = writeln!(out, "  return {status_factory}(overrides);");
             let _ = writeln!(out, "}}");
             out.push('\n');
         }
-        if let Some(request_body) = &operation.request_body {
-            let kind = request_kind(&operation.method);
-            let type_name = format!("{type_base}{kind}");
-            let factory_name = naming.factory_name(&type_name);
+        if let (Some(type_name), Some(request_body)) = (names.request(), &operation.request_body) {
+            let factory = factory_name(naming, &type_name);
             write_schema_factory(
                 &mut out,
-                &factory_name,
+                &factory,
                 &type_name,
                 None,
                 request_body,
@@ -213,7 +204,7 @@ struct FactoryWriteCtx<'a> {
 
 fn write_schema_factory(
     out: &mut String,
-    factory_name: &str,
+    factory: &str,
     type_name: &str,
     root_schema_name: Option<&str>,
     schema: &SchemaNode,
@@ -226,7 +217,7 @@ fn write_schema_factory(
             let literals = enum_literal_list(values);
             let _ = writeln!(
                 out,
-                "export function {factory_name}(value?: {type_name}): {type_name} {{"
+                "export function {factory}(value?: {type_name}): {type_name} {{"
             );
             if literals.is_empty() {
                 let _ = writeln!(out, "  return value as {type_name};");
@@ -240,19 +231,19 @@ fn write_schema_factory(
         }
         SchemaNode::Ref { name } => {
             let target_type_name = naming.schema_type_name(name);
-            let target_factory = naming.factory_name(&target_type_name);
+            let target_factory = factory_name(naming, &target_type_name);
             let is_enum = matches!(schemas.get(name), Some(SchemaNode::Enum { .. }));
             if is_enum {
                 let _ = writeln!(
                     out,
-                    "export function {factory_name}(value?: {type_name}): {type_name} {{"
+                    "export function {factory}(value?: {type_name}): {type_name} {{"
                 );
                 let _ = writeln!(out, "  return {target_factory}(value);");
                 let _ = writeln!(out, "}}");
             } else {
                 let _ = writeln!(
                     out,
-                    "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
+                    "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
                 );
                 let _ = writeln!(out, "  return {target_factory}(overrides);");
                 let _ = writeln!(out, "}}");
@@ -261,13 +252,13 @@ fn write_schema_factory(
         SchemaNode::Array { items, .. } => {
             let _ = writeln!(
                 out,
-                "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
+                "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
             let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular);
             let item_expr = match items.as_ref() {
                 SchemaNode::Ref { name } => {
                     let item_type_name = naming.schema_type_name(name);
-                    let item_factory = naming.factory_name(&item_type_name);
+                    let item_factory = factory_name(naming, &item_type_name);
                     format!("{item_factory}()")
                 }
                 other => faker_expr(other, naming, schemas, faker_ctx),
@@ -288,7 +279,7 @@ fn write_schema_factory(
             let paginated = is_paginated_list_schema(schema);
             let _ = writeln!(
                 out,
-                "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
+                "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
             let _ = writeln!(out, "  const defaults: {type_name} = {defaults};");
             if paginated {
@@ -375,26 +366,5 @@ fn is_paginated_list_schema(schema: &SchemaNode) -> bool {
         SchemaNode::AllOf { items, .. } => items.iter().any(is_paginated_list_schema),
         SchemaNode::Ref { .. } => false,
         _ => false,
-    }
-}
-
-fn types_import_path(file: &str) -> String {
-    let stem = file.trim_end_matches(".ts");
-    format!("./{stem}")
-}
-
-fn success_alias(method: &str) -> &'static str {
-    if method.eq_ignore_ascii_case("get") {
-        "QueryResponse"
-    } else {
-        "MutationResponse"
-    }
-}
-
-fn request_kind(method: &str) -> &'static str {
-    if method.eq_ignore_ascii_case("get") {
-        "QueryRequest"
-    } else {
-        "MutationRequest"
     }
 }

@@ -930,3 +930,179 @@ fn the_plugin_filter_cannot_leave_out_a_dependency() {
          Add `factories` to --plugins, or set `parser = \"data\"` in [plugins.msw]."
     );
 }
+
+/// Every relative import in the generated files points at a written file that
+/// exports each imported name.
+fn assert_imports_resolve(out: &std::path::Path, files: &[&str]) {
+    let import_re = regex::Regex::new(r"import (?:type )?\{([^}]*)\} from '(\./[^']+)';").unwrap();
+    let export_re = regex::Regex::new(
+        r"(?m)^export (?:type|interface|enum|const|function|async function) ([A-Za-z0-9_$]+)",
+    )
+    .unwrap();
+    let mut checked = 0;
+    for file in files {
+        let path = out.join(file);
+        let contents = std::fs::read_to_string(&path).unwrap();
+        for import in import_re.captures_iter(&contents) {
+            let target = path.parent().unwrap().join(format!("{}.ts", &import[2]));
+            let target_contents = std::fs::read_to_string(&target)
+                .unwrap_or_else(|_| panic!("{file} imports {} but it was not written", &import[2]));
+            let exported: std::collections::HashSet<&str> = export_re
+                .captures_iter(&target_contents)
+                .map(|c| c.get(1).unwrap().as_str())
+                .collect();
+            for name in import[1]
+                .split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+            {
+                assert!(
+                    exported.contains(name),
+                    "{file} imports `{name}` from {}, which does not export it",
+                    &import[2]
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "no relative imports found in {files:?}");
+}
+
+#[test]
+fn factories_and_handlers_only_import_names_their_dependencies_export() {
+    // `formats` has no operations, so it has no operation names to check.
+    for fixture in ["tiny", "parity"] {
+        for parser in ["faker", "data"] {
+            let dir = tempdir().unwrap();
+            let out = dir.path().join("generated");
+            let spec = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/{fixture}.openapi.yaml"));
+            let toml = format!(
+                r#"
+[source]
+input = "{spec}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+
+[[naming.overrides]]
+match = {{ kind = "operation_id", pattern = "." }}
+operation = {{ prefix = "Api", suffix = "Op" }}
+
+[plugins.types]
+file = "api-types.ts"
+
+[plugins.factories]
+enabled = true
+file = "fake-data.ts"
+
+[plugins.msw]
+enabled = true
+parser = "{parser}"
+"#,
+                spec = spec.display(),
+                cache = dir.path().join("cache").display(),
+                out = out.display(),
+            )
+            .replace('\\', "/");
+            let config_path = dir.path().join("specmint.toml");
+            std::fs::write(&config_path, toml).unwrap();
+
+            generate(GenerateOptions {
+                config: ConfigSource::Path(config_path),
+                plugins: specmint::plugins::builtin(),
+                mode: None,
+                plugin_filter: None,
+                force: true,
+                write_schema: None,
+            })
+            .unwrap();
+
+            let handlers = std::fs::read_to_string(out.join("handlers.ts")).unwrap();
+            assert!(
+                handlers.contains("from './api-types'"),
+                "{fixture}/{parser}"
+            );
+            assert!(
+                handlers.contains(" Api"),
+                "{fixture}/{parser}: rename applied"
+            );
+            assert_imports_resolve(&out, &["fake-data.ts", "handlers.ts"]);
+        }
+    }
+}
+
+#[test]
+fn handlers_use_the_success_status_the_types_plugin_picks() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("generated");
+    let spec = dir.path().join("spec.yaml");
+    std::fs::write(
+        &spec,
+        r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /jobs:
+    post:
+      operationId: startJob
+      responses:
+        "200": { description: done, content: { application/json: { schema: { type: string } } } }
+        "202": { description: queued, content: { application/json: { schema: { type: integer } } } }
+"#,
+    )
+    .unwrap();
+    let toml = format!(
+        r#"
+[source]
+input = "{spec}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+
+[plugins.factories]
+enabled = true
+
+[plugins.msw]
+enabled = true
+"#,
+        spec = spec.display(),
+        cache = dir.path().join("cache").display(),
+        out = out.display(),
+    )
+    .replace('\\', "/");
+    let config_path = dir.path().join("specmint.toml");
+    std::fs::write(&config_path, toml).unwrap();
+    generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        plugins: specmint::plugins::builtin(),
+        mode: None,
+        plugin_filter: None,
+        force: true,
+        write_schema: None,
+    })
+    .unwrap();
+
+    let types = std::fs::read_to_string(out.join("types.ts")).unwrap();
+    let handlers = std::fs::read_to_string(out.join("handlers.ts")).unwrap();
+    let alias_status = regex::Regex::new(r"export type StartJobMutationResponse = StartJob(\w+);")
+        .unwrap()
+        .captures(&types)
+        .unwrap_or_else(|| panic!("no success alias:\n{types}"))[1]
+        .to_string();
+    let handler_status =
+        regex::Regex::new(r"startJobHandler\.success = startJobHandler\.response\[(\w+)\];")
+            .unwrap()
+            .captures(&handlers)
+            .unwrap_or_else(|| panic!("no success helper:\n{handlers}"))[1]
+            .to_string();
+
+    assert_eq!(alias_status, "200");
+    assert_eq!(handler_status, alias_status);
+}

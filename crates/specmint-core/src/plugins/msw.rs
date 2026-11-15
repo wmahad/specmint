@@ -16,8 +16,8 @@ use crate::adapter::SchemaNode;
 use crate::config::Config;
 use crate::error::Result;
 use crate::plugin::{ActiveDependency, OutputFile, Plugin, PluginContext};
-use crate::plugins::factories::FactoriesOptions;
-use crate::plugins::types::TypesOptions;
+use crate::plugins::factories::{FactoriesOptions, factory_name};
+use crate::plugins::types::{OperationTypeNames, TypesOptions};
 
 pub struct MswPlugin;
 
@@ -120,24 +120,23 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
     let use_faker = msw_cfg.parser == "faker";
-    let types_file = import_stem(&TypesOptions::from_config(ctx.config)?.file);
-    let factories_file = import_stem(&FactoriesOptions::from_config(ctx.config)?.file);
+    let types_file = TypesOptions::from_config(ctx.config)?.import_path();
+    let factories_file = FactoriesOptions::from_config(ctx.config)?.import_path();
 
     let mut type_imports: IndexSet<String> = IndexSet::new();
     let mut factory_imports: IndexSet<String> = IndexSet::new();
     let mut handler_names: Vec<String> = Vec::new();
 
     for op in &spec.operations {
-        let base = naming.operation_type_base(&op.operation_id);
-        for (code, _) in &op.responses {
-            type_imports.insert(format!("{base}{code}"));
+        let names = OperationTypeNames::new(naming, op);
+        for code in op.responses.keys() {
+            type_imports.insert(names.response(code));
         }
-        if op.responses.keys().any(|c| c.starts_with('2')) {
-            let alias = success_alias(&op.method);
-            type_imports.insert(format!("{base}{alias}"));
+        if let Some(success) = names.success_response() {
             if use_faker {
-                factory_imports.insert(naming.factory_name(&format!("{base}{alias}")));
+                factory_imports.insert(factory_name(naming, &success));
             }
+            type_imports.insert(success);
         }
     }
 
@@ -165,25 +164,21 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     for op in &spec.operations {
         let handler = naming.handler_name(&op.operation_id);
         handler_names.push(handler.clone());
-        let base = naming.operation_type_base(&op.operation_id);
+        let names = OperationTypeNames::new(naming, op);
         let method = op.method.to_ascii_lowercase();
         let http_method = msw_http_method(&method);
         let url = msw_url(&msw_cfg.base_url, &op.path);
-        let primary = op
-            .responses
-            .iter()
-            .find(|(c, _)| c.starts_with('2'))
-            .map(|(c, schema)| (c.as_str(), schema));
-        let success_type = primary.map(|(_code, _)| {
-            let alias = success_alias(&op.method);
-            format!("{base}{alias}")
-        });
+        // The response the success alias points at, as the types plugin picks it.
+        let primary = names
+            .success_status()
+            .map(|code| (code, &op.responses[code]));
+        let success_type = names.success_response();
         // Empty-body success responses (`Unknown`) have no useful factory default.
         let success_factory = primary.and_then(|(_code, schema)| {
             if matches!(schema, SchemaNode::Unknown { .. }) {
                 None
             } else {
-                success_type.as_ref().map(|t| naming.factory_name(t))
+                success_type.as_ref().map(|t| factory_name(naming, t))
             }
         });
 
@@ -227,7 +222,7 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
             let _ = writeln!(out, "    switch (status) {{");
             for (code, schema) in &op.responses {
                 let status_num: u16 = code.parse().unwrap_or(200);
-                let type_name = format!("{base}{code}");
+                let type_name = names.response(code);
                 let _ = writeln!(out, "      case {code}: {{");
                 if status_num == 204 {
                     let _ = writeln!(
@@ -287,7 +282,7 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
         let _ = writeln!(out, "{handler}.response = {{");
         for (code, _) in &op.responses {
             let status_num: u16 = code.parse().unwrap_or(200);
-            let type_name = format!("{base}{code}");
+            let type_name = names.response(code);
             if status_num == 204 {
                 let _ = writeln!(
                     out,
@@ -375,19 +370,6 @@ function normalizeHandlerInput<TBody, TStatus extends number | string>(
   return { data: input };
 }
 "#;
-
-fn import_stem(file: &str) -> String {
-    let stem = file.trim_end_matches(".ts");
-    format!("./{stem}")
-}
-
-fn success_alias(method: &str) -> &'static str {
-    if method.eq_ignore_ascii_case("get") {
-        "QueryResponse"
-    } else {
-        "MutationResponse"
-    }
-}
 
 fn msw_http_method(method: &str) -> &str {
     match method {

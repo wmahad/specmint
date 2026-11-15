@@ -12,10 +12,15 @@ mod zod;
 
 use crate::plugin::Plugin;
 
-pub use factories::{FactoriesOptions, FactoriesPlugin};
+pub use factories::{FactoriesOptions, FactoriesPlugin, factory_name};
 pub use msw::{MswOptions, MswPlugin};
-pub use types::{TypesOptions, TypesPlugin};
+pub use types::{OperationTypeNames, TypesOptions, TypesPlugin};
 pub use zod::{ZodOptions, ZodPlugin};
+
+/// How one generated file imports another: `"models/api.ts"` → `"./models/api"`.
+fn relative_import(file: &str) -> String {
+    format!("./{}", file.trim_end_matches(".ts"))
+}
 
 /// Every built-in plugin.
 pub fn builtin() -> Vec<Box<dyn Plugin>> {
