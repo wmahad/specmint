@@ -1291,3 +1291,41 @@ fn handlers_without_a_default_response_keep_their_exact_status_type() {
     );
     assert!(!handlers.contains("| number>"), "{handlers}");
 }
+
+#[test]
+fn enum_factories_match_the_enum_style_the_types_plugin_writes() {
+    let factories_for = |types_toml: &str| {
+        let plugins = format!("{types_toml}\n[plugins.factories]\nenabled = true\n");
+        let (dir, report) = generate_tiny(&plugins, None, None);
+        report.unwrap();
+        std::fs::read_to_string(dir.path().join("generated/factories.ts")).unwrap()
+    };
+
+    // TypeScript `enum`: string literals need a cast to the enum type.
+    let enums = factories_for("[plugins.types]\nenum_style = \"enum\"\n");
+    assert!(
+        enums.contains(
+            "faker.helpers.arrayElement<AccountTypeEnum>(['free', 'paid'] as AccountTypeEnum[])"
+        ),
+        "{enums}"
+    );
+
+    // String-literal unions accept the literals as they are.
+    for style in ["literal", "as_const"] {
+        let literals = factories_for(&format!("[plugins.types]\nenum_style = \"{style}\"\n"));
+        assert!(
+            literals.contains("faker.helpers.arrayElement<AccountTypeEnum>(['free', 'paid']);"),
+            "{style}: {literals}"
+        );
+    }
+
+    // A per-schema override decides for that schema only.
+    let mixed = factories_for(
+        "[plugins.types]\nenum_style = \"enum\"\n\n[[plugins.types.overrides]]\nmatch = { kind = \"schema_name\", pattern = \"^AccountTypeEnum$\" }\nenum_style = \"literal\"\n",
+    );
+    assert!(
+        mixed.contains("arrayElement<AccountTypeEnum>(['free', 'paid']);"),
+        "{mixed}"
+    );
+    assert!(mixed.contains("as AdditivesEnum[])"), "{mixed}");
+}

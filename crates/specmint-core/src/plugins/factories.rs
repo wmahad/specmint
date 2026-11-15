@@ -20,7 +20,7 @@ use crate::naming::{AffixNames, AffixOverride, Naming};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 use crate::plugins::cycles::{build_ref_graph, find_circular_names};
 use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
-use crate::plugins::types::{OperationTypeNames, TypesOptions};
+use crate::plugins::types::{EnumStyle, OperationTypeNames, TypeStyles, TypesOptions};
 
 pub struct FactoriesPlugin;
 
@@ -142,7 +142,9 @@ impl Plugin for FactoriesPlugin {
 fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
-    let types_file = TypesOptions::from_config(ctx.config)?.import_path();
+    let types = TypesOptions::from_config(ctx.config)?;
+    let types_file = types.import_path();
+    let type_styles = types.styles()?;
     let schemas: &SchemaMap = &spec.schemas;
     let graph = build_ref_graph(schemas);
     let circular = find_circular_names(&graph);
@@ -153,6 +155,7 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
         graph: &graph,
         circular: &circular,
         factory_names: &factory_names,
+        type_styles: &type_styles,
     };
 
     let mut type_names: IndexSet<String> = IndexSet::new();
@@ -239,6 +242,7 @@ struct FactoryWriteCtx<'a> {
     graph: &'a crate::plugins::cycles::RefGraph,
     circular: &'a IndexSet<String>,
     factory_names: &'a FactoryNames,
+    type_styles: &'a TypeStyles,
 }
 
 fn write_schema_factory(
@@ -254,6 +258,13 @@ fn write_schema_factory(
     match schema {
         SchemaNode::Enum { values, .. } => {
             let literals = enum_literal_list(values);
+            // A TypeScript `enum` does not accept its values as string literals.
+            let cast = match root_schema_name {
+                Some(name) if ctx.type_styles.enum_style(name) == EnumStyle::Enum => {
+                    format!(" as {type_name}[]")
+                }
+                _ => String::new(),
+            };
             let _ = writeln!(
                 out,
                 "export function {factory}(value?: {type_name}): {type_name} {{"
@@ -263,7 +274,7 @@ fn write_schema_factory(
             } else {
                 let _ = writeln!(
                     out,
-                    "  return value ?? faker.helpers.arrayElement<{type_name}>([{literals}]);"
+                    "  return value ?? faker.helpers.arrayElement<{type_name}>([{literals}]{cast});"
                 );
             }
             let _ = writeln!(out, "}}");
