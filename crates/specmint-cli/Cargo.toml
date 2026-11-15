@@ -2,7 +2,7 @@
 name = "specmint-cli"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "OpenAPI → TypeScript generator CLI (Kubb-compatible)"
 license = "MIT"
 publish = false
