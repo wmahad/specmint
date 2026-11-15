@@ -467,8 +467,16 @@ fn faker_expr_for_property(
         } => {
             infer_boolean_faker_from_prop(prop).unwrap_or_else(|| "faker.datatype.boolean()".into())
         }
-        SchemaNode::Array { items, .. } if is_string_list_prop(prop) => {
-            let _ = items;
+        SchemaNode::Array { items, .. }
+            if is_string_list_prop(prop)
+                && matches!(
+                    items.as_ref(),
+                    SchemaNode::Primitive {
+                        primitive: PrimitiveKind::String,
+                        ..
+                    }
+                ) =>
+        {
             "arrayOf(() => (faker.string.alphanumeric({ length: { min: 8, max: 16 } })))".into()
         }
         _ => faker_expr(schema, naming, schemas, ctx),
