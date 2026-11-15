@@ -1,17 +1,39 @@
 {
   "$schema": "https://turborepo.com/schema.json",
-  "globalDependencies": ["Cargo.toml", "Cargo.lock"],
+  "globalDependencies": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    ".cargo/**"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/crates/**"],
-      "outputs": ["*.node", "index.js", "index.d.ts"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/crates/specmint-core/Cargo.toml",
+        "$TURBO_ROOT$/crates/specmint-core/src/**",
+        "$TURBO_ROOT$/crates/specmint-napi/Cargo.toml",
+        "$TURBO_ROOT$/crates/specmint-napi/build.rs",
+        "$TURBO_ROOT$/crates/specmint-napi/src/**"
+      ],
+      "outputs": [
+        "*.node",
+        "index.js",
+        "index.d.ts"
+      ]
     },
     "test": {
-      "dependsOn": ["^test"]
+      "dependsOn": [
+        "^test"
+      ]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": [
+        "^lint"
+      ]
     }
   }
 }

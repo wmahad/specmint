@@ -1,7 +1,7 @@
 {
   "name": "crate-specmint-core",
   "private": true,
-  "description": "Turborepo wrapper for the specmint Rust crate. Not published.",
+  "description": "Turborepo wrapper for the Rust crate in this folder (Cargo package `specmint`). Not published.",
   "scripts": {
     "test": "cargo test -p specmint",
     "lint": "cargo clippy -p specmint --all-targets -- -D warnings"

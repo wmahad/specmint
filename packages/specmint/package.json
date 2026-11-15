@@ -40,7 +40,7 @@
     "build": "napi build --manifest-path ../../crates/specmint-napi/Cargo.toml --platform --release --output-dir .",
     "build:debug": "napi build --manifest-path ../../crates/specmint-napi/Cargo.toml --platform --output-dir .",
     "lint": "oxlint bin src-js scripts",
-    "prepack": "cp ../../README.md ../../LICENSE .",
+    "prepack": "node -e \"for (const f of ['README.md', 'LICENSE']) require('node:fs').copyFileSync('../../' + f, f)\"",
     "clean": "rm -rf *.node index.js index.d.ts node_modules .turbo",
     "postinstall": "node scripts/postinstall.mjs"
   },

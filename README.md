@@ -91,17 +91,7 @@ Each Rust crate has a small private `package.json` whose scripts call cargo, so 
 
 ## Develop
 
-You need Rust (stable) and Node 22.18 or newer with pnpm.
-
-```bash
-pnpm install         # install workspace dependencies
-pnpm build           # build the Node addon for this platform into packages/specmint
-pnpm test            # cargo tests for every crate
-pnpm lint            # clippy for the crates, oxlint for the npm package
-pnpm format          # rustfmt
-```
-
-`pnpm build`, `pnpm test` and `pnpm lint` run through Turborepo, so a second run with no changes comes from the cache. To run one package, add a filter, for example `pnpm turbo run test --filter crate-specmint-core`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the main commands (`pnpm install`, `pnpm build`, `pnpm test`, `pnpm lint`).
 
 Generated and not committed: `target/`, and the addon files (`*.node`, `index.js`, `index.d.ts`) in `packages/specmint`.
 

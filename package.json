@@ -10,7 +10,8 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "format": "cargo fmt --all",
-    "format:check": "cargo fmt --all -- --check"
+    "format:check": "cargo fmt --all -- --check",
+    "clean": "pnpm -r run clean && cargo clean"
   },
   "devDependencies": {
     "turbo": "^2.11.11"

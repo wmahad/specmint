@@ -67,8 +67,10 @@ async function downloadViaApi(version, nodeFile, headers) {
 }
 
 async function main() {
-  // Source checkout (the monorepo): build locally instead of downloading.
-  if (existsSync(path.join(rootDir, "../../crates/specmint-napi/Cargo.toml"))) {
+  // Source checkout (the monorepo): build locally instead of downloading. An
+  // installed copy always lives under node_modules, so never skip the download there.
+  const installed = rootDir.split(path.sep).includes("node_modules");
+  if (!installed && existsSync(path.join(rootDir, "../../crates/specmint-napi/Cargo.toml"))) {
     return;
   }
 
