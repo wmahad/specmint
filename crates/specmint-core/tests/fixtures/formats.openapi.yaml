@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Formats Fixture API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Event:
+      type: object
+      required: [id, startsAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
