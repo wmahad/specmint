@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 
 use crate::adapter::{
-    Discriminator, EnumValue, ParameterLocation, ParameterNode, ParsedSpec, PrimitiveKind,
-    SchemaNode,
+    Discriminator, EnumValue, OperationNode, ParameterLocation, ParameterNode, ParsedSpec,
+    PrimitiveKind, SchemaNode,
 };
 use serde::Deserialize;
 
@@ -67,6 +67,81 @@ impl TypesOptions {
     pub fn from_config(config: &Config) -> Result<Self> {
         config.plugins.section_or_default(TypesPlugin.name())
     }
+
+    /// How other generated files import the types file.
+    pub fn import_path(&self) -> String {
+        super::relative_import(&self.file)
+    }
+}
+
+/// The names the types plugin gives one operation's types. Other plugins
+/// import these from the types file, so they take the names from here.
+pub struct OperationTypeNames<'a> {
+    base: String,
+    operation: &'a OperationNode,
+}
+
+impl<'a> OperationTypeNames<'a> {
+    pub fn new(naming: &Naming, operation: &'a OperationNode) -> Self {
+        Self {
+            base: naming.operation_type_base(&operation.operation_id),
+            operation,
+        }
+    }
+
+    fn is_query(&self) -> bool {
+        self.operation.method.eq_ignore_ascii_case("get")
+    }
+
+    /// The response type for one status code (`GetPet200`).
+    pub fn response(&self, status: &str) -> String {
+        format!("{}{status}", self.base)
+    }
+
+    /// The first 2xx status, which the success alias points at.
+    pub fn success_status(&self) -> Option<&'a str> {
+        self.operation
+            .responses
+            .keys()
+            .find(|code| code.starts_with('2'))
+            .map(String::as_str)
+    }
+
+    /// The success alias (`GetPetQueryResponse`, `UpdatePetMutationResponse`),
+    /// written when the operation has a 2xx response.
+    pub fn success_response(&self) -> Option<String> {
+        self.success_status()?;
+        let kind = if self.is_query() {
+            "QueryResponse"
+        } else {
+            "MutationResponse"
+        };
+        Some(format!("{}{kind}", self.base))
+    }
+
+    /// The request body type (`UpdatePetMutationRequest`), written when the
+    /// operation has a body.
+    pub fn request(&self) -> Option<String> {
+        self.operation.request_body.as_ref()?;
+        let kind = if self.is_query() {
+            "QueryRequest"
+        } else {
+            "MutationRequest"
+        };
+        Some(format!("{}{kind}", self.base))
+    }
+
+    /// The type grouping the parameters in one location (`GetPetPathParams`).
+    /// Cookie parameters get no type yet.
+    pub fn params(&self, location: ParameterLocation) -> Option<String> {
+        let group = match location {
+            ParameterLocation::Query => "QueryParams",
+            ParameterLocation::Path => "PathParams",
+            ParameterLocation::Header => "HeaderParams",
+            ParameterLocation::Cookie => return None,
+        };
+        Some(format!("{}{group}", self.base))
+    }
 }
 
 impl Plugin for TypesPlugin {
@@ -123,62 +198,47 @@ fn render_types(spec: &ParsedSpec, naming: &Naming, types_cfg: &TypesOptions) ->
         out.push('\n');
     }
 
-    // Operation auxiliary types (query/path params + response aliases).
+    // Operation auxiliary types (query/path/header params + response aliases).
     for op in &spec.operations {
-        let base = naming.operation_type_base(&op.operation_id);
+        let names = OperationTypeNames::new(naming, op);
 
-        write_param_group(
-            &mut out,
-            &base,
-            "QueryParams",
-            &op.parameters,
+        // Header params are additive and safe even when unused (empty groups are skipped).
+        for location in [
             ParameterLocation::Query,
-            naming,
-            &spec.schemas,
-        )?;
-        write_param_group(
-            &mut out,
-            &base,
-            "PathParams",
-            &op.parameters,
             ParameterLocation::Path,
-            naming,
-            &spec.schemas,
-        )?;
-        // Additive Kubb surface — safe even when unused (empty groups are skipped).
-        write_param_group(
-            &mut out,
-            &base,
-            "HeaderParams",
-            &op.parameters,
             ParameterLocation::Header,
-            naming,
-            &spec.schemas,
-        )?;
-
-        for (code, schema) in &op.responses {
-            write_response_type(&mut out, &base, code, schema, naming, &spec.schemas)?;
+        ] {
+            let group_name = names
+                .params(location)
+                .expect("written locations have a name");
+            write_param_group(
+                &mut out,
+                &group_name,
+                &op.parameters,
+                location,
+                naming,
+                &spec.schemas,
+            )?;
         }
 
-        // Primary success alias: QueryResponse for GET, MutationResponse otherwise.
-        if let Some((code, _)) = op.responses.iter().find(|(c, _)| c.starts_with('2')) {
-            let alias = if op.method.eq_ignore_ascii_case("get") {
-                "QueryResponse"
-            } else {
-                "MutationResponse"
-            };
-            let _ = writeln!(out, "export type {base}{alias} = {base}{code};");
+        for (code, schema) in &op.responses {
+            write_response_type(
+                &mut out,
+                &names.response(code),
+                schema,
+                naming,
+                &spec.schemas,
+            )?;
+        }
+
+        if let (Some(alias), Some(code)) = (names.success_response(), names.success_status()) {
+            let _ = writeln!(out, "export type {alias} = {};", names.response(code));
             out.push('\n');
         }
 
-        if let Some(body) = &op.request_body {
+        if let (Some(request), Some(body)) = (names.request(), &op.request_body) {
             let ts = schema_to_ts(body, naming, types_cfg.strip_readonly, &spec.schemas)?;
-            let kind = if op.method.eq_ignore_ascii_case("get") {
-                "QueryRequest"
-            } else {
-                "MutationRequest"
-            };
-            let _ = writeln!(out, "export type {base}{kind} = {ts};");
+            let _ = writeln!(out, "export type {request} = {ts};");
             out.push('\n');
         }
     }
@@ -190,8 +250,7 @@ fn render_types(spec: &ParsedSpec, naming: &Naming, types_cfg: &TypesOptions) ->
 /// (e.g. `ImportExportPipelinesExportJobsCreatePathParamsPipelineSlug`).
 fn write_param_group(
     out: &mut String,
-    base: &str,
-    group_suffix: &str,
+    group_name: &str,
     parameters: &[ParameterNode],
     location: ParameterLocation,
     naming: &Naming,
@@ -205,7 +264,6 @@ fn write_param_group(
         return Ok(());
     }
 
-    let group_name = format!("{base}{group_suffix}");
     let mut fields = Vec::new();
     for p in &params {
         let ts = if let Some(values) = enum_values_of(&p.schema) {
@@ -237,13 +295,11 @@ fn write_param_group(
 /// extracted from `error_code` properties (including oneOf arms).
 fn write_response_type(
     out: &mut String,
-    base: &str,
-    code: &str,
+    type_name: &str,
     schema: &SchemaNode,
     naming: &Naming,
     schemas: &indexmap::IndexMap<String, SchemaNode>,
 ) -> Result<()> {
-    let type_name = format!("{base}{code}");
     let error_code_name = format!("{type_name}ErrorCode");
 
     if let Some(values) = collect_error_code_values(schema)
