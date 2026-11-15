@@ -631,10 +631,6 @@ dir = "{cache}"
 path = "{out}"
 clean = true
 
-[emitters.types]
-enabled = true
-file = "types.ts"
-
 [emitters.zod]
 enabled = true
 file = "zod.ts"
