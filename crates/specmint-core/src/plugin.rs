@@ -34,8 +34,9 @@ pub struct ActiveDependency {
     /// Name of the plugin depended on.
     pub plugin: &'static str,
     /// Another way to fix the config, besides switching the plugin on, written
-    /// to finish the sentence "Switch on `x`, or …" (e.g. "set `parser = \"data\"`
-    /// in [plugins.msw]").
+    /// to finish the sentence "Switch on `x`, or …". Name options by their path
+    /// (e.g. "set plugins.msw.parser to \"data\""), so the hint reads the same
+    /// for TOML and TypeScript configs.
     pub alternative: Option<String>,
 }
 

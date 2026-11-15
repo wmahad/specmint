@@ -864,7 +864,7 @@ fn msw_with_the_faker_parser_and_factories_off_stops_and_names_both_fixes() {
     assert_eq!(
         report.err().unwrap().to_string(),
         "plugin[msw]: needs the `factories` plugin, which is off. \
-         Switch on `factories`, or set `parser = \"data\"` in [plugins.msw]."
+         Switch on `factories`, or set plugins.msw.parser to \"data\"."
     );
 }
 
@@ -924,7 +924,7 @@ fn the_plugin_filter_cannot_leave_out_a_dependency() {
     assert_eq!(
         err,
         "plugin[msw]: needs the `factories` plugin, which is not in --plugins. \
-         Add `factories` to --plugins, or set `parser = \"data\"` in [plugins.msw]."
+         Add `factories` to --plugins, or set plugins.msw.parser to \"data\"."
     );
 }
 
