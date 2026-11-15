@@ -137,7 +137,7 @@ impl Plugin for MswPlugin {
         if MswOptions::from_config(config)?.parser == MswParser::Faker {
             dependencies.push(ActiveDependency {
                 plugin: "factories",
-                alternative: Some("set `parser = \"data\"` in [plugins.msw]".to_string()),
+                alternative: Some("set plugins.msw.parser to \"data\"".to_string()),
             });
         }
         Ok(dependencies)

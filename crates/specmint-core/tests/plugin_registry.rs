@@ -87,10 +87,7 @@ impl Plugin for FakePlugin {
             .iter()
             .map(|dep| ActiveDependency {
                 plugin: dep,
-                alternative: Some(format!(
-                    "set `standalone = true` in [plugins.{}]",
-                    self.name
-                )),
+                alternative: Some(format!("set plugins.{}.standalone to true", self.name)),
             })
             .collect())
     }
@@ -421,7 +418,7 @@ fn a_plugin_whose_dependency_is_off_stops_the_run_and_names_the_fix() {
     assert_eq!(
         err,
         "plugin[dependent]: needs the `base` plugin, which is off. \
-         Switch on `base`, or set `standalone = true` in [plugins.dependent]."
+         Switch on `base`, or set plugins.dependent.standalone to true."
     );
 }
 
@@ -491,7 +488,7 @@ fn specmint_never_switches_on_a_dependency_itself() {
     assert_eq!(
         err,
         "plugin[dependent]: needs the `base` plugin, which is not in --plugins. \
-         Add `base` to --plugins, or set `standalone = true` in [plugins.dependent]."
+         Add `base` to --plugins, or set plugins.dependent.standalone to true."
     );
 }
 
@@ -520,7 +517,7 @@ fn types_mode_switching_off_a_dependency_stops_the_run() {
     assert_eq!(
         err,
         "plugin[dependent]: needs the `mocks` plugin, which --mode types skips. \
-         Run without --mode types, or set `standalone = true` in [plugins.dependent]."
+         Run without --mode types, or set plugins.dependent.standalone to true."
     );
 }
 
