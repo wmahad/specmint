@@ -80,33 +80,33 @@ impl SourceLoader {
             );
         }
 
-        if !force && self.use_content_hash {
-            if let Some(cached) = self.cache.read_if_fresh()? {
-                if self.use_etag {
-                    match fetch::conditional_get(url, auth.as_deref(), cached.meta.etag.as_deref())?
-                    {
-                        fetch::FetchOutcome::NotModified => {
-                            info!("schema unchanged (HTTP 304); using cache");
-                            return Ok(LoadedSchema {
-                                bytes: cached.bytes,
-                                content_hash: cached.meta.content_hash,
-                                etag: cached.meta.etag,
-                                from_cache: true,
-                            });
-                        }
-                        fetch::FetchOutcome::Body { bytes, etag } => {
-                            return self.store_and_return(bytes, etag);
-                        }
+        if !force
+            && self.use_content_hash
+            && let Some(cached) = self.cache.read_if_fresh()?
+        {
+            if self.use_etag {
+                match fetch::conditional_get(url, auth.as_deref(), cached.meta.etag.as_deref())? {
+                    fetch::FetchOutcome::NotModified => {
+                        info!("schema unchanged (HTTP 304); using cache");
+                        return Ok(LoadedSchema {
+                            bytes: cached.bytes,
+                            content_hash: cached.meta.content_hash,
+                            etag: cached.meta.etag,
+                            from_cache: true,
+                        });
                     }
-                } else {
-                    debug!("using content-hash cache without revalidation");
-                    return Ok(LoadedSchema {
-                        bytes: cached.bytes,
-                        content_hash: cached.meta.content_hash,
-                        etag: cached.meta.etag,
-                        from_cache: true,
-                    });
+                    fetch::FetchOutcome::Body { bytes, etag } => {
+                        return self.store_and_return(bytes, etag);
+                    }
                 }
+            } else {
+                debug!("using content-hash cache without revalidation");
+                return Ok(LoadedSchema {
+                    bytes: cached.bytes,
+                    content_hash: cached.meta.content_hash,
+                    etag: cached.meta.etag,
+                    from_cache: true,
+                });
             }
         }
 

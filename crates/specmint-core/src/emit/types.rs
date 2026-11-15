@@ -200,17 +200,17 @@ fn write_response_type(
     let type_name = format!("{base}{code}");
     let error_code_name = format!("{type_name}ErrorCode");
 
-    if let Some(values) = collect_error_code_values(schema) {
-        if !values.is_empty() {
-            write_string_enum(out, &error_code_name, &values, naming)?;
-            out.push('\n');
-            let rewritten = rewrite_error_code_refs(schema, &error_code_name);
-            let rewritten = omit_writeonly_fields(&rewritten);
-            let ts = schema_to_ts(&rewritten, naming, false, schemas)?;
-            let _ = writeln!(out, "export type {type_name} = {ts};");
-            out.push('\n');
-            return Ok(());
-        }
+    if let Some(values) = collect_error_code_values(schema)
+        && !values.is_empty()
+    {
+        write_string_enum(out, &error_code_name, &values, naming)?;
+        out.push('\n');
+        let rewritten = rewrite_error_code_refs(schema, &error_code_name);
+        let rewritten = omit_writeonly_fields(&rewritten);
+        let ts = schema_to_ts(&rewritten, naming, false, schemas)?;
+        let _ = writeln!(out, "export type {type_name} = {ts};");
+        out.push('\n');
+        return Ok(());
     }
 
     let schema = omit_writeonly_fields(schema);
@@ -333,12 +333,12 @@ fn collect_error_code_values(schema: &SchemaNode) -> Option<Vec<EnumValue>> {
 fn collect_error_code_values_into(schema: &SchemaNode, out: &mut Vec<EnumValue>) {
     match schema {
         SchemaNode::Object { properties, .. } => {
-            if let Some(code_schema) = properties.get("error_code") {
-                if let Some(values) = enum_values_of(code_schema) {
-                    for v in values {
-                        if !out.contains(v) {
-                            out.push(v.clone());
-                        }
+            if let Some(code_schema) = properties.get("error_code")
+                && let Some(values) = enum_values_of(code_schema)
+            {
+                for v in values {
+                    if !out.contains(v) {
+                        out.push(v.clone());
                     }
                 }
             }
@@ -370,28 +370,28 @@ fn rewrite_error_code_refs(schema: &SchemaNode, error_code_name: &str) -> Schema
             description,
         } => {
             let mut properties = properties.clone();
-            if let Some(code_schema) = properties.get("error_code") {
-                if enum_values_of(code_schema).is_some() {
-                    let code_nullable = match code_schema {
-                        SchemaNode::Enum { nullable, .. } => *nullable,
-                        SchemaNode::AllOf { nullable, .. } => *nullable,
-                        _ => false,
-                    };
-                    let ref_node = SchemaNode::Ref {
-                        name: error_code_name.to_string(),
-                    };
-                    properties.insert(
-                        "error_code".into(),
-                        if code_nullable {
-                            SchemaNode::AllOf {
-                                items: vec![ref_node],
-                                nullable: true,
-                            }
-                        } else {
-                            ref_node
-                        },
-                    );
-                }
+            if let Some(code_schema) = properties.get("error_code")
+                && enum_values_of(code_schema).is_some()
+            {
+                let code_nullable = match code_schema {
+                    SchemaNode::Enum { nullable, .. } => *nullable,
+                    SchemaNode::AllOf { nullable, .. } => *nullable,
+                    _ => false,
+                };
+                let ref_node = SchemaNode::Ref {
+                    name: error_code_name.to_string(),
+                };
+                properties.insert(
+                    "error_code".into(),
+                    if code_nullable {
+                        SchemaNode::AllOf {
+                            items: vec![ref_node],
+                            nullable: true,
+                        }
+                    } else {
+                        ref_node
+                    },
+                );
             }
             SchemaNode::Object {
                 properties,
@@ -563,12 +563,11 @@ fn schema_to_ts(
             // omit readOnly fields (Kubb stripReadonly). Keep enum/primitive aliases
             // (`LanguageEnum[]`, not `'en' | 'nl'[]`) — expanding those was both a
             // paren bug and broke assignability from named input types.
-            if strip_readonly {
-                if let Some(resolved) = schemas.get(name) {
-                    if ref_should_expand_for_strip_readonly(resolved) {
-                        return schema_to_ts(resolved, naming, true, schemas);
-                    }
-                }
+            if strip_readonly
+                && let Some(resolved) = schemas.get(name)
+                && ref_should_expand_for_strip_readonly(resolved)
+            {
+                return schema_to_ts(resolved, naming, true, schemas);
             }
             Ok(naming.schema_type_name(name))
         }
