@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::naming::Naming;
 use crate::plugin::{Plugin, PluginContext, PluginRegistry};
 use crate::source::{GenerateFingerprint, SourceLoader};
-use crate::write::{outputs_exist, write_outputs};
+use crate::write::{file_header, outputs_exist, write_outputs};
 
 /// Where to load the config from — a file path (native TOML) or config already
 /// resolved to JSON (e.g. by the npm package's JS/TS config loader).
@@ -139,7 +139,12 @@ pub fn generate(opts: GenerateOptions) -> Result<GenerateReport> {
     let t3 = Instant::now();
     // Types-only mode should not wipe test-data files another tool still owns.
     let clean = config.output.clean && opts.mode != Some(GenerateMode::Types);
-    let written = write_outputs(&config.output.path, clean, &files)?;
+    let written = write_outputs(
+        &config.output.path,
+        clean,
+        &file_header(&config.output.banner),
+        &files,
+    )?;
     timings.write = t3.elapsed();
 
     fingerprint.write_spec_hash(&spec_hash)?;
