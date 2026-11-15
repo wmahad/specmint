@@ -1342,3 +1342,17 @@ fn an_unknown_msw_parser_stops_the_run_and_lists_the_valid_ones() {
     assert!(err.contains("`fakr`"), "{err}");
     assert!(err.contains("`faker`") && err.contains("`data`"), "{err}");
 }
+
+#[test]
+fn a_plugin_override_with_the_wrong_kind_stops_the_run() {
+    let (_dir, report) = generate_tiny(
+        "[plugins.factories]\nenabled = true\n\n[[plugins.factories.overrides]]\nmatch = { kind = \"operation_id\", pattern = \"^listPets$\" }\nnaming = { prefix = \"make\" }\n",
+        None,
+        None,
+    );
+    let err = report.err().unwrap().to_string();
+    assert!(
+        err.contains("plugins.factories.overrides: `kind = \"operation_id\"` never applies here"),
+        "{err}"
+    );
+}

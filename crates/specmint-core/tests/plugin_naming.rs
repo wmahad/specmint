@@ -155,3 +155,55 @@ fn a_partial_naming_rule_keeps_the_plugins_other_defaults() {
         "zpetStatusSchema"
     );
 }
+
+#[test]
+fn an_override_with_a_kind_the_plugin_never_matches_is_an_error() {
+    let factories = config(
+        r#"{ "factories": { "overrides": [
+            { "match": { "kind": "operation_id", "pattern": "^getPet$" }, "naming": { "prefix": "x" } }
+        ] } }"#,
+    );
+    let err = FactoriesOptions::from_config(&factories)
+        .unwrap()
+        .names()
+        .err()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        err,
+        "config: plugins.factories.overrides: `kind = \"operation_id\"` never applies here; \
+         these overrides match `kind = \"schema_name\"`"
+    );
+
+    let msw = config(
+        r#"{ "msw": { "overrides": [
+            { "match": { "kind": "schema_name", "pattern": "^Pet$" }, "naming": { "prefix": "x" } }
+        ] } }"#,
+    );
+    let err = MswOptions::from_config(&msw)
+        .unwrap()
+        .handler_names()
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("plugins.msw.overrides: `kind = \"schema_name\"` never applies here"),
+        "{err}"
+    );
+
+    let types = config(
+        r#"{ "types": { "overrides": [
+            { "match": { "kind": "operation_id", "pattern": "." }, "enum_style": "literal" }
+        ] } }"#,
+    );
+    let err = TypesOptions::from_config(&types)
+        .unwrap()
+        .styles()
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("plugins.types.overrides: `kind = \"operation_id\"` never applies here"),
+        "{err}"
+    );
+}
