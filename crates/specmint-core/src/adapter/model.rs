@@ -103,6 +103,74 @@ pub enum SchemaNode {
     },
 }
 
+impl SchemaNode {
+    /// The shape as a response carries it: `writeOnly` properties left out of
+    /// inline objects. `$ref`s are kept as they are, so a named component
+    /// still has its write fields wherever it is used as input.
+    pub fn without_write_only(&self) -> SchemaNode {
+        match self {
+            SchemaNode::Object {
+                properties,
+                required,
+                readonly_properties,
+                writeonly_properties,
+                additional_properties,
+                nullable,
+                description,
+            } => {
+                let properties: indexmap::IndexMap<_, _> = properties
+                    .iter()
+                    .filter(|(name, _)| !writeonly_properties.iter().any(|w| w == *name))
+                    .map(|(k, v)| (k.clone(), v.without_write_only()))
+                    .collect();
+                let required: Vec<_> = required
+                    .iter()
+                    .filter(|name| !writeonly_properties.iter().any(|w| w == *name))
+                    .cloned()
+                    .collect();
+                SchemaNode::Object {
+                    properties,
+                    required,
+                    readonly_properties: readonly_properties.clone(),
+                    writeonly_properties: vec![],
+                    additional_properties: additional_properties
+                        .as_ref()
+                        .map(|a| Box::new(a.without_write_only())),
+                    nullable: *nullable,
+                    description: description.clone(),
+                }
+            }
+            SchemaNode::Array {
+                items,
+                nullable,
+                description,
+            } => SchemaNode::Array {
+                items: Box::new(items.without_write_only()),
+                nullable: *nullable,
+                description: description.clone(),
+            },
+            SchemaNode::AllOf { items, nullable } => SchemaNode::AllOf {
+                items: items.iter().map(SchemaNode::without_write_only).collect(),
+                nullable: *nullable,
+            },
+            SchemaNode::OneOf {
+                items,
+                nullable,
+                discriminator,
+            } => SchemaNode::OneOf {
+                items: items.iter().map(SchemaNode::without_write_only).collect(),
+                nullable: *nullable,
+                discriminator: discriminator.clone(),
+            },
+            SchemaNode::AnyOf { items, nullable } => SchemaNode::AnyOf {
+                items: items.iter().map(SchemaNode::without_write_only).collect(),
+                nullable: *nullable,
+            },
+            other => other.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Discriminator {
     pub property_name: String,
@@ -126,4 +194,69 @@ pub enum PrimitiveKind {
     Integer,
     Boolean,
     Null,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object(props: &[(&str, SchemaNode)], required: &[&str], write_only: &[&str]) -> SchemaNode {
+        SchemaNode::Object {
+            properties: props
+                .iter()
+                .map(|(name, schema)| (name.to_string(), schema.clone()))
+                .collect(),
+            required: required.iter().map(|r| r.to_string()).collect(),
+            readonly_properties: vec![],
+            writeonly_properties: write_only.iter().map(|w| w.to_string()).collect(),
+            additional_properties: None,
+            nullable: false,
+            description: None,
+        }
+    }
+
+    fn string() -> SchemaNode {
+        SchemaNode::Primitive {
+            primitive: PrimitiveKind::String,
+            format: None,
+            nullable: false,
+            min_length: None,
+            max_length: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn without_write_only_drops_nested_write_only_fields_and_keeps_refs() {
+        let secret = SchemaNode::Ref {
+            name: "Secret".into(),
+        };
+        let schema = SchemaNode::Array {
+            items: Box::new(object(
+                &[
+                    ("id", string()),
+                    ("password", string()),
+                    ("secret", secret.clone()),
+                ],
+                &["id", "password"],
+                &["password"],
+            )),
+            nullable: false,
+            description: None,
+        };
+
+        let expected = SchemaNode::Array {
+            items: Box::new(object(
+                &[("id", string()), ("secret", secret)],
+                &["id"],
+                &[],
+            )),
+            nullable: false,
+            description: None,
+        };
+        assert_eq!(
+            serde_json::to_value(schema.without_write_only()).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
 }

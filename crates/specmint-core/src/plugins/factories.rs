@@ -20,9 +20,7 @@ use crate::naming::{AffixNames, AffixOverride, Naming};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 use crate::plugins::cycles::{build_ref_graph, find_circular_names};
 use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
-use crate::plugins::types::{
-    EnumStyle, OperationTypeNames, TypeStyles, TypesOptions, omit_writeonly_fields,
-};
+use crate::plugins::types::{EnumStyle, OperationTypeNames, TypeStyles, TypesOptions};
 
 pub struct FactoriesPlugin;
 
@@ -202,7 +200,7 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
         for (status_code, schema) in &operation.responses {
             let type_name = names.response(status_code);
             let factory = factory_names.name(&type_name);
-            let schema = omit_writeonly_fields(schema);
+            let schema = schema.without_write_only();
             write_schema_factory(&mut out, &factory, &type_name, None, &schema, &write_ctx)?;
             out.push('\n');
         }
