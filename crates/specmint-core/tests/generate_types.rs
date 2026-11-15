@@ -609,3 +609,59 @@ enabled = false
         "allOf factories should merge arms:\n{factories}"
     );
 }
+
+#[test]
+fn zod_date_time_strings_use_a_valid_options_object() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("generated");
+    let cache = dir.path().join("cache");
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats.openapi.yaml");
+
+    let config_path = dir.path().join("specmint.toml");
+    let toml = format!(
+        r#"
+[source]
+path = "{fixture}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+clean = true
+
+[emitters.types]
+enabled = true
+file = "types.ts"
+
+[emitters.zod]
+enabled = true
+file = "zod.ts"
+"#,
+        fixture = fixture.display(),
+        cache = cache.display(),
+        out = out.display(),
+    )
+    .replace('\\', "/");
+    std::fs::write(&config_path, toml).unwrap();
+
+    generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        mode: None,
+        emitter_filter: None,
+        force: true,
+        write_schema: None,
+    })
+    .unwrap();
+
+    let zod = std::fs::read_to_string(out.join("zod.ts")).unwrap();
+    assert!(
+        zod.contains("startsAt: z.string().datetime({ offset: true })"),
+        "date-time should use a single-brace options object:\n{zod}"
+    );
+    assert!(
+        !zod.contains("{{"),
+        "zod output must not contain doubled braces:\n{zod}"
+    );
+}

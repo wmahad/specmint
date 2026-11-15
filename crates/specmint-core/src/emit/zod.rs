@@ -79,7 +79,7 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
                     Some("uuid") => "z.string().uuid()".into(),
                     Some("email") => "z.string().email()".into(),
                     Some("uri") | Some("url") => "z.string().url()".into(),
-                    Some("date-time") => "z.string().datetime({{ offset: true }})".into(),
+                    Some("date-time") => "z.string().datetime({ offset: true })".into(),
                     _ => "z.string()".into(),
                 },
                 PrimitiveKind::Integer => "z.number().int()".into(),
