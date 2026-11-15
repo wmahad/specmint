@@ -1190,3 +1190,104 @@ fn naming_keys_that_moved_into_plugins_are_rejected_in_core_config() {
         );
     }
 }
+
+/// Runs the built-in plugins on an inline spec and returns the output folder.
+fn generate_inline(spec_yaml: &str, plugins_toml: &str) -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let spec = dir.path().join("spec.yaml");
+    std::fs::write(&spec, spec_yaml).unwrap();
+    let toml = format!(
+        r#"
+[source]
+input = "{spec}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+
+{plugins_toml}
+"#,
+        spec = spec.display(),
+        cache = dir.path().join("cache").display(),
+        out = dir.path().join("generated").display(),
+    )
+    .replace('\\', "/");
+    let config_path = dir.path().join("specmint.toml");
+    std::fs::write(&config_path, toml).unwrap();
+    generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        plugins: specmint::plugins::builtin(),
+        mode: None,
+        plugin_filter: None,
+        force: true,
+        write_schema: None,
+    })
+    .unwrap();
+    dir
+}
+
+const DEFAULT_RESPONSE_SPEC: &str = r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      parameters:
+        - { name: petId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: ok, content: { application/json: { schema: { type: string } } } }
+        "404": { description: missing }
+        default:
+          description: error
+          content: { application/json: { schema: { type: object, properties: { message: { type: string } } } } }
+"#;
+
+#[test]
+fn handlers_for_a_default_response_are_valid_typescript() {
+    let dir = generate_inline(
+        DEFAULT_RESPONSE_SPEC,
+        "[plugins.factories]\nenabled = true\n\n[plugins.msw]\nenabled = true\n",
+    );
+    let handlers = std::fs::read_to_string(dir.path().join("generated/handlers.ts")).unwrap();
+
+    // `default` is not a status: any status goes, and it is not a switch case.
+    assert!(
+        handlers.contains("input?: HandlerInput<GetPetQueryResponse, 200 | 404 | number>,"),
+        "{handlers}"
+    );
+    assert!(!handlers.contains("case default"), "{handlers}");
+    assert!(!handlers.contains("[default]"), "{handlers}");
+    // The default helper answers with a status the caller picks (500 if not).
+    assert!(
+        handlers.contains(
+            "  default: (data: GetPetdefault, status = 500) => HttpResponse.json(data, { status }),"
+        ),
+        "{handlers}"
+    );
+    assert!(
+        handlers.contains(
+            "export const getPetHandlerResponsedefault = getPetHandler.response.default;"
+        ),
+        "{handlers}"
+    );
+}
+
+#[test]
+fn handlers_without_a_default_response_keep_their_exact_status_type() {
+    let (dir, report) = generate_tiny(
+        "[plugins.factories]\nenabled = true\n\n[plugins.msw]\nenabled = true\n",
+        None,
+        None,
+    );
+    report.unwrap();
+    let handlers = std::fs::read_to_string(dir.path().join("generated/handlers.ts")).unwrap();
+
+    assert!(
+        handlers.contains("input?: HandlerInput<ListPetsQueryResponse, 200 | 400>,"),
+        "{handlers}"
+    );
+    assert!(!handlers.contains("| number>"), "{handlers}");
+}

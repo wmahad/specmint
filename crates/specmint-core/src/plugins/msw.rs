@@ -229,14 +229,19 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
         } else {
             success_type.clone().unwrap_or_else(|| "unknown".into())
         };
+        // Numeric statuses as literals. A `default` response covers every other
+        // status, so it adds `number`.
         let status_lit = {
-            let lit = op
+            let mut parts: Vec<&str> = op
                 .responses
                 .keys()
-                .map(|c| c.as_str())
-                .collect::<Vec<_>>()
-                .join(" | ");
-            if lit.is_empty() { "number".into() } else { lit }
+                .map(String::as_str)
+                .filter(|code| is_status_code(code))
+                .collect();
+            if parts.is_empty() || op.responses.keys().any(|code| !is_status_code(code)) {
+                parts.push("number");
+            }
+            parts.join(" | ")
         };
 
         let _ = writeln!(
@@ -262,7 +267,9 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
                 "    const status = normalized.status ?? {primary_code};"
             );
             let _ = writeln!(out, "    switch (status) {{");
-            for (code, schema) in &op.responses {
+            // A `default` response has no case: the `default:` branch below
+            // serves every status the spec doesn't list.
+            for (code, schema) in op.responses.iter().filter(|(c, _)| is_status_code(c)) {
                 let status_num: u16 = code.parse().unwrap_or(200);
                 let type_name = names.response(code);
                 let _ = writeln!(out, "      case {code}: {{");
@@ -325,7 +332,13 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
         for (code, _) in &op.responses {
             let status_num: u16 = code.parse().unwrap_or(200);
             let type_name = names.response(code);
-            if status_num == 204 {
+            if !is_status_code(code) {
+                // `default`: the caller picks the status.
+                let _ = writeln!(
+                    out,
+                    "  {code}: (data: {type_name}, status = 500) => HttpResponse.json(data, {{ status }}),"
+                );
+            } else if status_num == 204 {
                 let _ = writeln!(
                     out,
                     "  {code}: (_data?: {type_name}) => new HttpResponse(null, {{ status: {status_num} }}),"
@@ -345,10 +358,15 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
             );
         }
         // Kubb-compatible top-level aliases still used across the test suite.
-        for (code, _) in &op.responses {
+        for code in op.responses.keys() {
+            let access = if is_status_code(code) {
+                format!("[{code}]")
+            } else {
+                format!(".{code}")
+            };
             let _ = writeln!(
                 out,
-                "export const {handler}Response{code} = {handler}.response[{code}];"
+                "export const {handler}Response{code} = {handler}.response{access};"
             );
         }
         let _ = writeln!(out, "{handler}.path = '{url}';");
@@ -412,6 +430,11 @@ function normalizeHandlerInput<TBody, TStatus extends number | string>(
   return { data: input };
 }
 "#;
+
+/// Whether a response key is an HTTP status (`"200"`), not `"default"`.
+fn is_status_code(code: &str) -> bool {
+    code.parse::<u16>().is_ok()
+}
 
 fn msw_http_method(method: &str) -> &str {
     match method {
