@@ -1356,3 +1356,44 @@ fn a_plugin_override_with_the_wrong_kind_stops_the_run() {
         "{err}"
     );
 }
+
+#[test]
+fn string_list_property_names_only_fill_string_arrays_with_strings() {
+    let dir = generate_inline(
+        r##"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Tag:
+      type: object
+      properties:
+        name: { type: string }
+    Pet:
+      type: object
+      properties:
+        tags: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+        roles: { type: array, items: { type: string } }
+        scopes: { type: array, items: { type: integer } }
+"##,
+        "[plugins.factories]\nenabled = true\n",
+    );
+    let factories = std::fs::read_to_string(dir.path().join("generated/factories.ts")).unwrap();
+
+    assert!(
+        factories.contains("    tags: arrayOf(() => (createTag())),"),
+        "{factories}"
+    );
+    assert!(
+        factories.contains(
+            "    roles: arrayOf(() => (faker.string.alphanumeric({ length: { min: 8, max: 16 } }))),"
+        ),
+        "{factories}"
+    );
+    assert!(
+        factories
+            .contains("    scopes: arrayOf(() => (faker.number.int({ min: 0, max: 10_000 }))),"),
+        "{factories}"
+    );
+}
