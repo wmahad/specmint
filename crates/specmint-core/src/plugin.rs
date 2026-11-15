@@ -199,9 +199,16 @@ fn dependency_order(plugins: Vec<Box<dyn Plugin>>) -> Result<Vec<Box<dyn Plugin>
         }
     }
     if order.len() != plugins.len() {
+        // Plugins left with unmet dependencies are the ones on (or behind) a cycle.
+        let stuck: Vec<&'static str> = plugins
+            .iter()
+            .zip(&indegree)
+            .filter(|(_, d)| **d > 0)
+            .map(|(p, _)| p.name())
+            .collect();
         return Err(Error::plugin(
-            "registry",
-            "cyclic plugin dependencies".to_string(),
+            stuck[0],
+            format!("cyclic plugin dependencies: {}", stuck.join(", ")),
         ));
     }
 

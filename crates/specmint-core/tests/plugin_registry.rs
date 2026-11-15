@@ -261,7 +261,11 @@ fn a_registry_rejects_unknown_dependencies_cycles_and_duplicate_names() {
         }),
     ]);
     let err = cycle.err().unwrap().to_string();
-    assert!(err.contains("cyclic plugin dependencies"), "{err}");
+    assert!(
+        err.contains("cyclic plugin dependencies: alpha, beta"),
+        "{err}"
+    );
+    assert!(!err.contains("registry"), "{err}");
 
     let duplicate = PluginRegistry::new(vec![
         Box::new(FakePlugin::new("alpha", &log)),

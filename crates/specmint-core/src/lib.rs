@@ -1,6 +1,6 @@
 //! `specmint` — OpenAPI → TypeScript code generation.
 //!
-//! Pipeline: load schema → parse into [`ParsedSpec`] → run the enabled plugins
+//! Pipeline: load the spec → parse it into a [`adapter::ParsedSpec`] → run the enabled plugins
 //! → write files. Core knows plugins only through the [`plugin::Plugin`]
 //! trait; the built-in plugins live in [`plugins`].
 

@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Load schema, build IR, run enabled plugins, write outputs.
+    /// Load the spec, build the parsed spec, run the enabled plugins, write their files.
     Generate {
         /// Path to `specmint.toml`
         #[arg(long, short = 'c', default_value = "specmint.toml")]
