@@ -1329,3 +1329,16 @@ fn enum_factories_match_the_enum_style_the_types_plugin_writes() {
     );
     assert!(mixed.contains("as AdditivesEnum[])"), "{mixed}");
 }
+
+#[test]
+fn an_unknown_msw_parser_stops_the_run_and_lists_the_valid_ones() {
+    let (_dir, report) = generate_tiny(
+        "[plugins.factories]\nenabled = true\n\n[plugins.msw]\nenabled = true\nparser = \"fakr\"\n",
+        None,
+        None,
+    );
+    let err = report.err().unwrap().to_string();
+    assert!(err.contains("plugins.msw.parser"), "{err}");
+    assert!(err.contains("`fakr`"), "{err}");
+    assert!(err.contains("`faker`") && err.contains("`data`"), "{err}");
+}

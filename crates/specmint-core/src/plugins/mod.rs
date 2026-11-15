@@ -13,7 +13,7 @@ mod zod;
 use crate::plugin::Plugin;
 
 pub use factories::{FactoriesOptions, FactoriesPlugin, FactoryNames};
-pub use msw::{HandlerNames, MswOptions, MswPlugin};
+pub use msw::{HandlerNames, MswOptions, MswParser, MswPlugin};
 pub use types::{
     EnumStyle, ObjectSyntax, OperationTypeNames, TypeStyles, TypesOptions, TypesOverride,
     TypesPlugin,

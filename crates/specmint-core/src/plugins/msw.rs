@@ -30,9 +30,8 @@ pub struct MswOptions {
     pub enabled: bool,
     #[serde(default = "default_file")]
     pub file: String,
-    /// `"faker"` seeds success bodies from factories; `"data"` requires caller data.
-    #[serde(default = "default_parser")]
-    pub parser: String,
+    #[serde(default)]
+    pub parser: MswParser,
     #[serde(default = "default_base_url")]
     pub base_url: String,
     /// When true, emit `export const handlers = […all handlers…]` (Kubb `handlers: true`).
@@ -72,8 +71,15 @@ fn default_file() -> String {
     "handlers.ts".into()
 }
 
-fn default_parser() -> String {
-    "faker".into()
+/// Where a handler's default success body comes from.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MswParser {
+    /// Built by the factories plugin's factory for the success type.
+    #[default]
+    Faker,
+    /// None: the caller passes the data.
+    Data,
 }
 
 fn default_base_url() -> String {
@@ -85,7 +91,7 @@ impl Default for MswOptions {
         Self {
             enabled: false,
             file: default_file(),
-            parser: default_parser(),
+            parser: MswParser::default(),
             base_url: default_base_url(),
             handlers_barrel: false,
             naming: AffixNamingPatch::default(),
@@ -128,7 +134,7 @@ impl Plugin for MswPlugin {
             alternative: None,
         }];
         // Only the faker parser imports factories.
-        if MswOptions::from_config(config)?.parser == "faker" {
+        if MswOptions::from_config(config)?.parser == MswParser::Faker {
             dependencies.push(ActiveDependency {
                 plugin: "factories",
                 alternative: Some("set `parser = \"data\"` in [plugins.msw]".to_string()),
@@ -158,7 +164,7 @@ impl Plugin for MswPlugin {
 fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
-    let use_faker = msw_cfg.parser == "faker";
+    let use_faker = msw_cfg.parser == MswParser::Faker;
     let types_file = TypesOptions::from_config(ctx.config)?.import_path();
     let factories = FactoriesOptions::from_config(ctx.config)?;
     let factories_file = factories.import_path();
