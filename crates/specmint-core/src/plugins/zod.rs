@@ -109,7 +109,7 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<St
             schemas: &spec.schemas,
             graph: &graph,
             circular: &circular,
-            root: name,
+            component: name,
             direct_refs: false,
         };
         let expr = schema_to_zod(schema, ctx)?;
@@ -134,8 +134,7 @@ struct ZodCtx<'a> {
     schemas: &'a SchemaMap,
     graph: &'a RefGraph,
     circular: &'a indexmap::IndexSet<String>,
-    /// The component schema being written.
-    root: &'a str,
+    component: &'a str,
     /// Inside a getter, refs need no `z.lazy`: the getter already defers them.
     direct_refs: bool,
 }
@@ -241,7 +240,7 @@ fn schema_to_zod(schema: &SchemaNode, ctx: ZodCtx<'_>) -> Result<String> {
                 // A `z.lazy` that closes a cycle leaves TypeScript inferring `any`
                 // (TS7022); a getter is Zod 4's typed way to recurse.
                 let in_cycle = property_cycle_kind(
-                    ctx.root,
+                    ctx.component,
                     prop_schema,
                     ctx.schemas,
                     ctx.graph,
