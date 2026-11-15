@@ -1,4 +1,4 @@
-//! OpenAPI document → parsed OpenAPI model shared by all emitters.
+//! OpenAPI document → parsed OpenAPI model shared by all plugins.
 
 mod model;
 mod parse;

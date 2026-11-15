@@ -6,6 +6,7 @@ use tempfile::tempdir;
 use specmint::adapter::parse_openapi;
 use specmint::config::{Config, EnumStyle, GenerateMode, ObjectSyntax};
 use specmint::generate::{ConfigSource, GenerateOptions, generate};
+use specmint::plugins::TypesOptions;
 
 #[test]
 fn parses_fixture_schemas_and_operations() {
@@ -88,17 +89,17 @@ schema_case = "PascalCase"
 match = {{ kind = "schema_name", pattern = "Discriminator$" }}
 enum_style = "literal"
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 enum_style = "enum"
 strip_readonly = true
 compact = true
 
-[emitters.factories]
+[plugins.factories]
 enabled = false
 
-[emitters.msw]
+[plugins.msw]
 enabled = false
 "#,
         fixture = fixture.display(),
@@ -112,7 +113,8 @@ enabled = false
     let report = generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: Some(GenerateMode::Types),
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -152,24 +154,24 @@ dir = "{cache}"
 path = "{out}"
 clean = true
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 enum_style = "enum"
 compact = true
 
-[emitters.factories]
+[plugins.factories]
 enabled = true
 file = "factories.ts"
 seed = 2
 
-[emitters.msw]
+[plugins.msw]
 enabled = true
 file = "handlers.ts"
 parser = "faker"
 base_url = "*"
 
-[emitters.zod]
+[plugins.zod]
 enabled = true
 file = "zod.ts"
 inferred = true
@@ -184,7 +186,8 @@ inferred = true
     generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -280,15 +283,15 @@ dir = "{cache}"
 path = "{out}"
 clean = true
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 
-[emitters.factories]
+[plugins.factories]
 enabled = true
 file = "factories.ts"
 
-[emitters.msw]
+[plugins.msw]
 enabled = true
 file = "handlers.ts"
 parser = "data"
@@ -304,7 +307,8 @@ handlers_barrel = true
     generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -341,17 +345,17 @@ dir = "{cache}"
 path = "{out}"
 clean = true
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 syntax = "interface"
 enum_style = "enum"
 compact = true
 
-[emitters.factories]
+[plugins.factories]
 enabled = false
 
-[emitters.msw]
+[plugins.msw]
 enabled = false
 "#,
         fixture = fixture.display(),
@@ -364,7 +368,8 @@ enabled = false
     generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: Some(GenerateMode::Types),
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -383,13 +388,14 @@ fn config_deserializes_enum_style() {
 path = "./x.yml"
 [output]
 path = "./out"
-[emitters.types]
+[plugins.types]
 enum_style = "literal"
 syntax = "interface"
 "#;
     let cfg: Config = toml::from_str(raw).unwrap();
-    assert_eq!(cfg.emitters.types.enum_style, EnumStyle::Literal);
-    assert_eq!(cfg.emitters.types.syntax, ObjectSyntax::Interface);
+    let types = TypesOptions::from_config(&cfg).unwrap();
+    assert_eq!(types.enum_style, EnumStyle::Literal);
+    assert_eq!(types.syntax, ObjectSyntax::Interface);
 }
 
 /// High-value Kubb-parity contracts: const literals, strip_readonly on requests,
@@ -418,19 +424,19 @@ clean = true
 [adapter]
 validate = true
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 enum_style = "enum"
 strip_readonly = true
 compact = true
 
-[emitters.factories]
+[plugins.factories]
 enabled = true
 file = "factories.ts"
 seed = 2
 
-[emitters.msw]
+[plugins.msw]
 enabled = false
 "#,
         fixture = fixture.display(),
@@ -443,7 +449,8 @@ enabled = false
     generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -636,7 +643,7 @@ dir = "{cache}"
 path = "{out}"
 clean = true
 
-[emitters.zod]
+[plugins.zod]
 enabled = true
 file = "zod.ts"
 "#,
@@ -650,7 +657,8 @@ file = "zod.ts"
     generate(GenerateOptions {
         config: ConfigSource::Path(config_path),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: true,
         write_schema: None,
     })
@@ -665,4 +673,136 @@ file = "zod.ts"
         !zod.contains("{{"),
         "zod output must not contain doubled braces:\n{zod}"
     );
+}
+
+/// Runs the built-in plugins on the tiny fixture with `plugins_toml` as the
+/// `[plugins.*]` sections.
+fn generate_tiny(
+    plugins_toml: &str,
+    mode: Option<GenerateMode>,
+    plugin_filter: Option<Vec<String>>,
+) -> (
+    tempfile::TempDir,
+    specmint::Result<specmint::generate::GenerateReport>,
+) {
+    let dir = tempdir().unwrap();
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiny.openapi.yaml");
+    let toml = format!(
+        r#"
+[source]
+input = "{fixture}"
+
+[source.cache]
+dir = "{cache}"
+
+[output]
+path = "{out}"
+
+{plugins_toml}
+"#,
+        fixture = fixture.display(),
+        cache = dir.path().join("cache").display(),
+        out = dir.path().join("generated").display(),
+    )
+    .replace('\\', "/");
+    let config_path = dir.path().join("specmint.toml");
+    std::fs::write(&config_path, toml).unwrap();
+
+    let report = generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        plugins: specmint::plugins::builtin(),
+        mode,
+        plugin_filter,
+        force: true,
+        write_schema: None,
+    });
+    (dir, report)
+}
+
+fn written_names(report: &specmint::generate::GenerateReport) -> Vec<String> {
+    report
+        .written
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect()
+}
+
+const ALL_BUILTIN_PLUGINS_ON: &str = r#"
+[plugins.factories]
+enabled = true
+
+[plugins.msw]
+enabled = true
+
+[plugins.zod]
+enabled = true
+"#;
+
+#[test]
+fn only_the_types_plugin_is_on_by_default() {
+    let (_dir, report) = generate_tiny("", None, None);
+    assert_eq!(written_names(&report.unwrap()), ["types.ts"]);
+}
+
+#[test]
+fn each_builtin_plugin_writes_its_own_file_in_dependency_order() {
+    let (_dir, report) = generate_tiny(ALL_BUILTIN_PLUGINS_ON, None, None);
+    assert_eq!(
+        written_names(&report.unwrap()),
+        ["types.ts", "factories.ts", "zod.ts", "handlers.ts"]
+    );
+}
+
+#[test]
+fn types_mode_skips_factories_and_handlers_but_keeps_zod() {
+    let (_dir, report) = generate_tiny(ALL_BUILTIN_PLUGINS_ON, Some(GenerateMode::Types), None);
+    assert_eq!(written_names(&report.unwrap()), ["types.ts", "zod.ts"]);
+}
+
+#[test]
+fn the_plugin_filter_picks_builtin_plugins_by_name() {
+    let (_dir, report) =
+        generate_tiny("", None, Some(vec!["zod".to_string(), "types".to_string()]));
+    assert_eq!(written_names(&report.unwrap()), ["types.ts", "zod.ts"]);
+}
+
+#[test]
+fn a_plugin_reports_its_custom_file_name_for_the_unchanged_spec_check() {
+    let plugins = r#"
+[plugins.types]
+file = "api-types.ts"
+"#;
+    let (dir, report) = generate_tiny(plugins, None, None);
+    assert_eq!(written_names(&report.unwrap()), ["api-types.ts"]);
+
+    // Same spec, outputs present: the second run skips and reports the same file.
+    let config_path = dir.path().join("specmint.toml");
+    let second = generate(GenerateOptions {
+        config: ConfigSource::Path(config_path),
+        plugins: specmint::plugins::builtin(),
+        mode: None,
+        plugin_filter: None,
+        force: false,
+        write_schema: None,
+    })
+    .unwrap();
+    assert!(second.skipped);
+    assert_eq!(written_names(&second), ["api-types.ts"]);
+}
+
+#[test]
+fn a_config_section_for_an_unknown_plugin_stops_the_run() {
+    let (_dir, report) = generate_tiny("[plugins.mws]\nenabled = true\n", None, None);
+    let err = report.err().unwrap().to_string();
+    assert!(err.contains("unknown plugin `mws`"), "{err}");
+    assert!(err.contains("msw"), "{err}");
+}
+
+#[test]
+fn an_unknown_option_in_a_plugin_section_names_the_plugin() {
+    let (_dir, report) = generate_tiny("[plugins.msw]\nbase_ulr = \"/api\"\n", None, None);
+    let err = report.err().unwrap().to_string();
+    assert!(err.contains("plugins.msw"), "{err}");
+    assert!(err.contains("base_ulr"), "{err}");
 }

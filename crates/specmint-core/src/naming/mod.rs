@@ -1,6 +1,6 @@
-//! Naming resolvers — Kubb `Resolver` equivalent shared by all emitters.
+//! Naming resolvers — Kubb `Resolver` equivalent shared by all plugins.
 //!
-//! **Inversion of control:** emitters never choose casing themselves. They call
+//! **Inversion of control:** plugins never choose casing themselves. They call
 //! methods on [`Naming`], which applies [`crate::config::NamingConfig`] kind
 //! rules plus regex overrides.
 
@@ -10,7 +10,7 @@ use regex::Regex;
 
 use crate::config::{
     AffixNamingRule, CaseStyle, EnumMemberNamingRule, EnumStyle, IdentNamingRule, NamingConfig,
-    NamingOverride, OverrideKind, TypesEmitterConfig,
+    NamingOverride, OverrideKind,
 };
 use crate::error::Result;
 
@@ -146,30 +146,26 @@ impl Naming {
         apply_ident_rule(operation_id, &self.operation_rule(operation_id))
     }
 
-    pub fn enum_style_for_schema(
-        &self,
-        schema_name: &str,
-        types_cfg: &TypesEmitterConfig,
-    ) -> EnumStyle {
+    pub fn enum_style_for_schema(&self, schema_name: &str, default: EnumStyle) -> EnumStyle {
         for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_name) {
             if let Some(style) = ovr.enum_style {
                 return style;
             }
         }
-        types_cfg.enum_style
+        default
     }
 
     pub fn object_syntax_for_schema(
         &self,
         schema_name: &str,
-        types_cfg: &TypesEmitterConfig,
+        default: crate::config::ObjectSyntax,
     ) -> crate::config::ObjectSyntax {
         for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_name) {
             if let Some(syntax) = ovr.syntax {
                 return syntax;
             }
         }
-        types_cfg.syntax
+        default
     }
 }
 

@@ -19,19 +19,19 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Load schema, build IR, run enabled emitters, write outputs.
+    /// Load schema, build IR, run enabled plugins, write outputs.
     Generate {
         /// Path to `specmint.toml`
         #[arg(long, short = 'c', default_value = "specmint.toml")]
         config: std::path::PathBuf,
 
-        /// Override generation mode (types-only skips factories/msw even if enabled in config)
+        /// Override generation mode (types-only skips plugins that write test data, such as factories and msw, even if enabled in config)
         #[arg(long, value_enum)]
         mode: Option<ModeArg>,
 
-        /// Comma-separated emitter ids to run (overrides config `enabled` flags)
+        /// Comma-separated plugin names to run (overrides config `enabled` flags)
         #[arg(long, value_delimiter = ',')]
-        emitters: Option<Vec<String>>,
+        plugins: Option<Vec<String>>,
 
         /// Force re-fetch / re-emit even when caches match
         #[arg(long)]
@@ -76,7 +76,7 @@ fn run() -> anyhow::Result<()> {
         Commands::Generate {
             config,
             mode,
-            emitters,
+            plugins,
             force,
             timings,
             write_schema,
@@ -88,7 +88,8 @@ fn run() -> anyhow::Result<()> {
                     ModeArg::Full => specmint::config::GenerateMode::Full,
                     ModeArg::Types => specmint::config::GenerateMode::Types,
                 }),
-                emitter_filter: emitters,
+                plugins: specmint::plugins::builtin(),
+                plugin_filter: plugins,
                 force,
                 write_schema,
             })?;

@@ -49,7 +49,7 @@ export default defineConfig({
   },
 
   naming: {
-    // Kind policies — emitters ask Naming; they do not hardcode casing.
+    // Kind policies — plugins ask Naming; they do not hardcode casing.
     schema: {
       case: "PascalCase",
       // prefix: "",
@@ -89,7 +89,7 @@ export default defineConfig({
     ],
   },
 
-  emitters: {
+  plugins: {
     types: {
       enabled: true,
       file: "types.ts",

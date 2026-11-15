@@ -37,7 +37,7 @@ import { defineConfig } from "specmint/config";
 export default defineConfig({
   source: { input: "https://example.com/openapi.json" }, // or a local file path
   output: { path: "./.generated", clean: true },
-  emitters: {
+  plugins: {
     types: { enabled: true },
     factories: { enabled: true },
     msw: { enabled: true },
@@ -69,7 +69,7 @@ Or add a script in the consuming app (`"generate-api": "specmint"`) and run
 export SPECMINT_BASIC_AUTH='user:password'
 cargo run -p specmint-cli -- generate --config specmint.toml --force --timings
 cargo run -p specmint-cli -- generate --config specmint.toml --mode types
-cargo run -p specmint-cli -- generate --config specmint.toml --emitters types,factories,msw
+cargo run -p specmint-cli -- generate --config specmint.toml --plugins types,factories,msw
 ```
 
 ## Repository layout

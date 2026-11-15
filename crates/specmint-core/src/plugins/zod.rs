@@ -1,17 +1,56 @@
-//! Zod emitter → `zod.ts` (Phase 3 MVP).
+//! Zod plugin → `zod.ts` (Phase 3 MVP).
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::adapter::{EnumValue, ParsedSpec, PrimitiveKind, SchemaNode};
-use crate::emit::{EmitCtx, Emitter, OutputFile};
+use serde::Deserialize;
+
+use crate::config::Config;
 use crate::error::Result;
 use crate::naming::Naming;
+use crate::plugin::{OutputFile, Plugin, PluginContext};
 
-pub struct ZodEmitter;
+pub struct ZodPlugin;
 
-impl Emitter for ZodEmitter {
-    fn id(&self) -> &'static str {
+/// `[plugins.zod]`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZodOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_file")]
+    pub file: String,
+    #[serde(default = "default_true")]
+    pub inferred: bool,
+}
+
+fn default_file() -> String {
+    "zod.ts".into()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ZodOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            file: default_file(),
+            inferred: true,
+        }
+    }
+}
+
+impl ZodOptions {
+    pub fn from_config(config: &Config) -> Result<Self> {
+        config.plugins.section_or_default(ZodPlugin.name())
+    }
+}
+
+impl Plugin for ZodPlugin {
+    fn name(&self) -> &'static str {
         "zod"
     }
 
@@ -19,12 +58,17 @@ impl Emitter for ZodEmitter {
         &["types"]
     }
 
-    fn enabled(&self, ctx: &EmitCtx<'_>) -> bool {
-        ctx.enabled.zod
+    fn enabled(&self, config: &Config) -> Result<bool> {
+        Ok(ZodOptions::from_config(config)?.enabled)
     }
 
-    fn generate(&self, ctx: &EmitCtx<'_>) -> Result<Vec<OutputFile>> {
-        let body = render_zod(ctx.spec, ctx.naming, ctx.config.emitters.zod.inferred)?;
+    fn output_files(&self, config: &Config) -> Result<Vec<PathBuf>> {
+        Ok(vec![PathBuf::from(ZodOptions::from_config(config)?.file)])
+    }
+
+    fn generate(&self, ctx: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
+        let options = ZodOptions::from_config(ctx.config)?;
+        let body = render_zod(ctx.spec, ctx.naming, options.inferred)?;
         let mut contents = String::new();
         contents.push_str(ctx.config.output.banner.trim_end());
         contents.push('\n');
@@ -32,7 +76,7 @@ impl Emitter for ZodEmitter {
         contents.push_str(&body);
 
         Ok(vec![OutputFile {
-            relative_path: PathBuf::from(&ctx.config.emitters.zod.file),
+            relative_path: PathBuf::from(options.file),
             contents,
         }])
     }

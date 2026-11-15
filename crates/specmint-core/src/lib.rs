@@ -1,15 +1,16 @@
 //! `specmint` — OpenAPI → TypeScript code generation.
 //!
-//! Pipeline: load schema → parse into [`ParsedSpec`] → run emitters (types,
-//! factories, MSW, optional Zod) → write files. One binary; emitters are
-//! compiled in (no npm plugin graph).
+//! Pipeline: load schema → parse into [`ParsedSpec`] → run the enabled plugins
+//! → write files. Core knows plugins only through the [`plugin::Plugin`]
+//! trait; the built-in plugins live in [`plugins`].
 
 pub mod adapter;
 pub mod config;
-pub mod emit;
 pub mod error;
 pub mod generate;
 pub mod naming;
+pub mod plugin;
+pub mod plugins;
 pub mod source;
 pub mod write;
 

@@ -100,7 +100,7 @@ export interface SpecmintNaming {
   overrides?: SpecmintNamingOverride[];
 }
 
-export interface SpecmintTypesEmitter {
+export interface SpecmintTypesPlugin {
   enabled?: boolean;
   file?: string;
   enum_style?: EnumStyle;
@@ -110,13 +110,13 @@ export interface SpecmintTypesEmitter {
   compact?: boolean;
 }
 
-export interface SpecmintFactoriesEmitter {
+export interface SpecmintFactoriesPlugin {
   enabled?: boolean;
   file?: string;
   seed?: number;
 }
 
-export interface SpecmintMswEmitter {
+export interface SpecmintMswPlugin {
   enabled?: boolean;
   file?: string;
   /** `"faker"` seeds success bodies from factories; `"data"` requires caller data. */
@@ -125,17 +125,18 @@ export interface SpecmintMswEmitter {
   handlers_barrel?: boolean;
 }
 
-export interface SpecmintZodEmitter {
+export interface SpecmintZodPlugin {
   enabled?: boolean;
   file?: string;
   inferred?: boolean;
 }
 
-export interface SpecmintEmitters {
-  types?: SpecmintTypesEmitter;
-  factories?: SpecmintFactoriesEmitter;
-  msw?: SpecmintMswEmitter;
-  zod?: SpecmintZodEmitter;
+/** One section per plugin, keyed by plugin name. */
+export interface SpecmintPlugins {
+  types?: SpecmintTypesPlugin;
+  factories?: SpecmintFactoriesPlugin;
+  msw?: SpecmintMswPlugin;
+  zod?: SpecmintZodPlugin;
 }
 
 export interface SpecmintConfig {
@@ -143,7 +144,7 @@ export interface SpecmintConfig {
   output: SpecmintOutput;
   adapter?: SpecmintAdapter;
   naming?: SpecmintNaming;
-  emitters?: SpecmintEmitters;
+  plugins?: SpecmintPlugins;
 }
 
 /** Identity helper for editor autocomplete — mirrors `defineConfig` in vite/vitest/etc. */

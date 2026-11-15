@@ -1,4 +1,4 @@
-//! MSW handlers emitter → `handlers.ts` (improved vs Kubb).
+//! MSW handlers plugin → `handlers.ts` (improved vs Kubb).
 //!
 //! - Options: body | resolver | `{ status, data, delayMs }`
 //! - Status helpers on `handler.response[code]` / `.success`
@@ -10,15 +10,68 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use indexmap::IndexSet;
+use serde::Deserialize;
 
 use crate::adapter::SchemaNode;
-use crate::emit::{EmitCtx, Emitter, OutputFile};
+use crate::config::Config;
 use crate::error::Result;
+use crate::plugin::{OutputFile, Plugin, PluginContext};
+use crate::plugins::factories::FactoriesOptions;
+use crate::plugins::types::TypesOptions;
 
-pub struct MswEmitter;
+pub struct MswPlugin;
 
-impl Emitter for MswEmitter {
-    fn id(&self) -> &'static str {
+/// `[plugins.msw]`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MswOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_file")]
+    pub file: String,
+    /// `"faker"` seeds success bodies from factories; `"data"` requires caller data.
+    #[serde(default = "default_parser")]
+    pub parser: String,
+    #[serde(default = "default_base_url")]
+    pub base_url: String,
+    /// When true, emit `export const handlers = […all handlers…]` (Kubb `handlers: true`).
+    /// Default false — the app imports handlers à la carte.
+    #[serde(default)]
+    pub handlers_barrel: bool,
+}
+
+fn default_file() -> String {
+    "handlers.ts".into()
+}
+
+fn default_parser() -> String {
+    "faker".into()
+}
+
+fn default_base_url() -> String {
+    "*".into()
+}
+
+impl Default for MswOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            file: default_file(),
+            parser: default_parser(),
+            base_url: default_base_url(),
+            handlers_barrel: false,
+        }
+    }
+}
+
+impl MswOptions {
+    pub fn from_config(config: &Config) -> Result<Self> {
+        config.plugins.section_or_default(MswPlugin.name())
+    }
+}
+
+impl Plugin for MswPlugin {
+    fn name(&self) -> &'static str {
         "msw"
     }
 
@@ -26,12 +79,21 @@ impl Emitter for MswEmitter {
         &["types", "factories"]
     }
 
-    fn enabled(&self, ctx: &EmitCtx<'_>) -> bool {
-        ctx.enabled.msw
+    fn enabled(&self, config: &Config) -> Result<bool> {
+        Ok(MswOptions::from_config(config)?.enabled)
     }
 
-    fn generate(&self, ctx: &EmitCtx<'_>) -> Result<Vec<OutputFile>> {
-        let body = render_msw(ctx)?;
+    fn writes_test_data(&self) -> bool {
+        true
+    }
+
+    fn output_files(&self, config: &Config) -> Result<Vec<PathBuf>> {
+        Ok(vec![PathBuf::from(MswOptions::from_config(config)?.file)])
+    }
+
+    fn generate(&self, ctx: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
+        let options = MswOptions::from_config(ctx.config)?;
+        let body = render_msw(ctx, &options)?;
         let mut contents = String::new();
         contents.push_str(ctx.config.output.banner.trim_end());
         contents.push('\n');
@@ -39,19 +101,18 @@ impl Emitter for MswEmitter {
         contents.push_str(&body);
 
         Ok(vec![OutputFile {
-            relative_path: PathBuf::from(&ctx.config.emitters.msw.file),
+            relative_path: PathBuf::from(options.file),
             contents,
         }])
     }
 }
 
-fn render_msw(ctx: &EmitCtx<'_>) -> Result<String> {
+fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
-    let msw_cfg = &ctx.config.emitters.msw;
     let use_faker = msw_cfg.parser == "faker";
-    let types_file = import_stem(&ctx.config.emitters.types.file);
-    let factories_file = import_stem(&ctx.config.emitters.factories.file);
+    let types_file = import_stem(&TypesOptions::from_config(ctx.config)?.file);
+    let factories_file = import_stem(&FactoriesOptions::from_config(ctx.config)?.file);
 
     let mut type_imports: IndexSet<String> = IndexSet::new();
     let mut factory_imports: IndexSet<String> = IndexSet::new();
