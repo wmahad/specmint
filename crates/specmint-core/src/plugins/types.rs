@@ -401,7 +401,7 @@ fn write_response_type(
 
 /// Drop `writeOnly` props from inlined response shapes (Kubb keysToOmit). Named
 /// `$ref` aliases are left alone so Create/Input component types keep write fields.
-fn omit_writeonly_fields(schema: &SchemaNode) -> SchemaNode {
+pub(crate) fn omit_writeonly_fields(schema: &SchemaNode) -> SchemaNode {
     match schema {
         SchemaNode::Object {
             properties,
