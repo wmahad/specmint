@@ -1481,3 +1481,55 @@ fn response_factories_leave_out_write_only_properties_and_request_factories_keep
     let request = factory_body(&factories, "createCreateSecretMutationRequest");
     assert!(request.contains("password:"), "{request}");
 }
+
+#[test]
+fn recursive_zod_schemas_reach_their_cycle_through_getters_so_types_are_inferred() {
+    let dir = generate_inline(
+        r##"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Tree:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        children: { type: array, items: { $ref: "#/components/schemas/Tree" } }
+        owner: { $ref: "#/components/schemas/Owner" }
+    Owner:
+      type: object
+      properties:
+        id: { type: string }
+    Node:
+      type: object
+      properties:
+        child: { $ref: "#/components/schemas/NodeChild" }
+    NodeChild:
+      type: object
+      properties:
+        parent: { $ref: "#/components/schemas/Node" }
+"##,
+        "[plugins.zod]\nenabled = true\n",
+    );
+    let zod = std::fs::read_to_string(dir.path().join("generated/zod.ts")).unwrap();
+
+    assert!(
+        zod.contains("  get children() { return z.array(treeSchema).optional(); }"),
+        "{zod}"
+    );
+    assert!(zod.contains("  name: z.string(),"), "{zod}");
+    assert!(
+        zod.contains("  owner: z.lazy(() => ownerSchema).optional()"),
+        "{zod}"
+    );
+    assert!(
+        zod.contains("  get child() { return nodeChildSchema.optional(); }"),
+        "{zod}"
+    );
+    assert!(
+        zod.contains("  get parent() { return nodeSchema.optional(); }"),
+        "{zod}"
+    );
+}

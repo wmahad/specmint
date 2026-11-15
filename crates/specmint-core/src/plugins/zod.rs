@@ -10,6 +10,7 @@ use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config};
 use crate::error::Result;
 use crate::naming::{Naming, apply_affix_rule};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
+use crate::plugins::cycles::{CycleKind, Cycles};
 
 pub struct ZodPlugin;
 
@@ -95,10 +96,17 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<St
     let _ = writeln!(out, "import {{ z }} from 'zod';");
     out.push('\n');
 
-    // Forward-declare refs with z.lazy by emitting schemas in order; for cycles use lazy.
+    let cycles = Cycles::new(&spec.schemas);
     for (name, schema) in &spec.schemas {
         let zod_name = zod.schema_name(&naming.schema_type_name(name));
-        let expr = schema_to_zod(schema, naming, zod, true)?;
+        let ctx = ZodCtx {
+            naming,
+            zod,
+            cycles: &cycles,
+            component: name,
+            direct_refs: false,
+        };
+        let expr = schema_to_zod(schema, ctx)?;
         let _ = writeln!(out, "export const {zod_name} = {expr};");
         if zod.inferred {
             let type_name = naming.schema_type_name(name);
@@ -113,17 +121,25 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<St
     Ok(out)
 }
 
-fn schema_to_zod(
-    schema: &SchemaNode,
-    naming: &Naming,
-    zod: &ZodOptions,
-    top_level: bool,
-) -> Result<String> {
-    let _ = top_level;
+#[derive(Clone, Copy)]
+struct ZodCtx<'a> {
+    naming: &'a Naming,
+    zod: &'a ZodOptions,
+    cycles: &'a Cycles<'a>,
+    component: &'a str,
+    /// Inside a getter, refs need no `z.lazy`: the getter already defers them.
+    direct_refs: bool,
+}
+
+fn schema_to_zod(schema: &SchemaNode, ctx: ZodCtx<'_>) -> Result<String> {
     let base = match schema {
         SchemaNode::Ref { name } => {
-            let zod_name = zod.schema_name(&naming.schema_type_name(name));
-            format!("z.lazy(() => {zod_name})")
+            let zod_name = ctx.zod.schema_name(&ctx.naming.schema_type_name(name));
+            if ctx.direct_refs {
+                zod_name
+            } else {
+                format!("z.lazy(() => {zod_name})")
+            }
         }
         SchemaNode::Primitive {
             primitive,
@@ -197,7 +213,7 @@ fn schema_to_zod(
         SchemaNode::Array {
             items, nullable, ..
         } => {
-            let inner = schema_to_zod(items, naming, zod, false)?;
+            let inner = schema_to_zod(items, ctx)?;
             let mut expr = format!("z.array({inner})");
             if *nullable {
                 expr = format!("{expr}.nullable()");
@@ -213,15 +229,27 @@ fn schema_to_zod(
         } => {
             let mut fields = Vec::new();
             for (prop, prop_schema) in properties {
-                let mut field = schema_to_zod(prop_schema, naming, zod, false)?;
+                // A `z.lazy` that closes a cycle leaves TypeScript inferring `any`
+                // (TS7022); a getter is Zod 4's typed way to recurse.
+                let in_cycle =
+                    ctx.cycles.property_kind(ctx.component, prop_schema) != CycleKind::None;
+                let field_ctx = ZodCtx {
+                    direct_refs: ctx.direct_refs || in_cycle,
+                    ..ctx
+                };
+                let mut field = schema_to_zod(prop_schema, field_ctx)?;
                 if !required.iter().any(|r| r == prop) {
                     field = format!("{field}.optional()");
                 }
-                fields.push(format!("  {prop}: {field}"));
+                if in_cycle {
+                    fields.push(format!("  get {prop}() {{ return {field}; }}"));
+                } else {
+                    fields.push(format!("  {prop}: {field}"));
+                }
             }
             let mut expr = format!("z.object({{\n{}\n}})", fields.join(",\n"));
             if let Some(ap) = additional_properties {
-                let ap_expr = schema_to_zod(ap, naming, zod, false)?;
+                let ap_expr = schema_to_zod(ap, ctx)?;
                 expr = format!("{expr}.catchall({ap_expr})");
             }
             if *nullable {
@@ -233,9 +261,9 @@ fn schema_to_zod(
             if items.is_empty() {
                 return Ok("z.unknown()".into());
             }
-            let mut expr = schema_to_zod(&items[0], naming, zod, false)?;
+            let mut expr = schema_to_zod(&items[0], ctx)?;
             for item in items.iter().skip(1) {
-                let next = schema_to_zod(item, naming, zod, false)?;
+                let next = schema_to_zod(item, ctx)?;
                 expr = format!("z.intersection({expr}, {next})");
             }
             if *nullable {
@@ -250,10 +278,7 @@ fn schema_to_zod(
             if items.is_empty() {
                 return Ok("z.never()".into());
             }
-            let parts: Result<Vec<_>> = items
-                .iter()
-                .map(|i| schema_to_zod(i, naming, zod, false))
-                .collect();
+            let parts: Result<Vec<_>> = items.iter().map(|i| schema_to_zod(i, ctx)).collect();
             let parts = parts?;
             let mut expr = if parts.len() == 1 {
                 parts[0].clone()

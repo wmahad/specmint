@@ -13,13 +13,13 @@ use std::path::PathBuf;
 use indexmap::IndexSet;
 use serde::Deserialize;
 
-use crate::adapter::SchemaNode;
+use crate::adapter::{SchemaMap, SchemaNode};
 use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config, OverrideKind};
 use crate::error::Result;
 use crate::naming::{AffixNames, AffixOverride, Naming};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
-use crate::plugins::cycles::{build_ref_graph, find_circular_names};
-use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
+use crate::plugins::cycles::Cycles;
+use crate::plugins::faker_expr::{FakerCtx, enum_literal_list, faker_expr};
 use crate::plugins::types::{EnumStyle, OperationTypeNames, TypeStyles, TypesOptions};
 
 pub struct FactoriesPlugin;
@@ -144,14 +144,12 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
     let types_file = types.import_path();
     let type_styles = types.styles()?;
     let schemas: &SchemaMap = &spec.schemas;
-    let graph = build_ref_graph(schemas);
-    let circular = find_circular_names(&graph);
+    let cycles = Cycles::new(schemas);
     let factory_names = cfg.names()?;
     let write_ctx = FactoryWriteCtx {
         naming,
         schemas,
-        graph: &graph,
-        circular: &circular,
+        cycles: &cycles,
         factory_names: &factory_names,
         type_styles: &type_styles,
     };
@@ -238,8 +236,7 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
 struct FactoryWriteCtx<'a> {
     naming: &'a Naming,
     schemas: &'a SchemaMap,
-    graph: &'a crate::plugins::cycles::RefGraph,
-    circular: &'a IndexSet<String>,
+    cycles: &'a Cycles<'a>,
     factory_names: &'a FactoryNames,
     type_styles: &'a TypeStyles,
 }
@@ -303,8 +300,7 @@ fn write_schema_factory(
                 out,
                 "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
-            let faker_ctx =
-                FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular, ctx.factory_names);
+            let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.cycles, ctx.factory_names);
             let item_expr = match items.as_ref() {
                 SchemaNode::Ref { name } => {
                     let item_type_name = naming.schema_type_name(name);
@@ -324,8 +320,7 @@ fn write_schema_factory(
             let _ = writeln!(out, "}}");
         }
         _ => {
-            let faker_ctx =
-                FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular, ctx.factory_names);
+            let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.cycles, ctx.factory_names);
             let defaults = faker_expr(schema, naming, schemas, faker_ctx);
             let paginated = is_paginated_list_schema(schema);
             let _ = writeln!(
