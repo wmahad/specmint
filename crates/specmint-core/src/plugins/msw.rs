@@ -13,10 +13,11 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 
 use crate::adapter::SchemaNode;
-use crate::config::Config;
+use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config, OverrideKind};
 use crate::error::Result;
+use crate::naming::{AffixNames, AffixOverride, apply_affix_rule};
 use crate::plugin::{ActiveDependency, OutputFile, Plugin, PluginContext};
-use crate::plugins::factories::{FactoriesOptions, factory_name};
+use crate::plugins::factories::FactoriesOptions;
 use crate::plugins::types::{OperationTypeNames, TypesOptions};
 
 pub struct MswPlugin;
@@ -38,6 +39,33 @@ pub struct MswOptions {
     /// Default false — the app imports handlers à la carte.
     #[serde(default)]
     pub handlers_barrel: bool,
+    /// Handler names: `prefix + operation id cased by case + suffix`.
+    /// Keys left out keep their defaults (camelCase, no prefix, `Handler`).
+    #[serde(default)]
+    pub naming: AffixNamingPatch,
+    /// Per-operation naming patches, matched (`kind = "operation_id"`) against
+    /// the operation id.
+    #[serde(default)]
+    pub overrides: Vec<AffixOverride>,
+}
+
+/// The handler name for each operation, after overrides.
+#[derive(Debug)]
+pub struct HandlerNames(AffixNames);
+
+impl HandlerNames {
+    /// The name of the handler for `operation_id` (`listPetsHandler`).
+    pub fn name(&self, operation_id: &str) -> String {
+        apply_affix_rule(operation_id, &self.0.rule_for(operation_id))
+    }
+}
+
+fn default_naming() -> AffixNamingRule {
+    AffixNamingRule {
+        case: CaseStyle::CamelCase,
+        prefix: String::new(),
+        suffix: "Handler".into(),
+    }
 }
 
 fn default_file() -> String {
@@ -60,6 +88,8 @@ impl Default for MswOptions {
             parser: default_parser(),
             base_url: default_base_url(),
             handlers_barrel: false,
+            naming: AffixNamingPatch::default(),
+            overrides: Vec::new(),
         }
     }
 }
@@ -67,6 +97,15 @@ impl Default for MswOptions {
 impl MswOptions {
     pub fn from_config(config: &Config) -> Result<Self> {
         config.plugins.section_or_default(MswPlugin.name())
+    }
+
+    pub fn handler_names(&self) -> Result<HandlerNames> {
+        Ok(HandlerNames(AffixNames::new(
+            default_naming().apply_patch(&self.naming),
+            OverrideKind::OperationId,
+            self.overrides.clone(),
+            "plugins.msw.overrides",
+        )?))
     }
 }
 
@@ -121,7 +160,10 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     let naming = ctx.naming;
     let use_faker = msw_cfg.parser == "faker";
     let types_file = TypesOptions::from_config(ctx.config)?.import_path();
-    let factories_file = FactoriesOptions::from_config(ctx.config)?.import_path();
+    let factories = FactoriesOptions::from_config(ctx.config)?;
+    let factories_file = factories.import_path();
+    let factory_names = factories.names()?;
+    let handler_names_for = msw_cfg.handler_names()?;
 
     let mut type_imports: IndexSet<String> = IndexSet::new();
     let mut factory_imports: IndexSet<String> = IndexSet::new();
@@ -134,7 +176,7 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
         }
         if let Some(success) = names.success_response() {
             if use_faker {
-                factory_imports.insert(factory_name(naming, &success));
+                factory_imports.insert(factory_names.name(&success));
             }
             type_imports.insert(success);
         }
@@ -162,7 +204,7 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
     out.push('\n');
 
     for op in &spec.operations {
-        let handler = naming.handler_name(&op.operation_id);
+        let handler = handler_names_for.name(&op.operation_id);
         handler_names.push(handler.clone());
         let names = OperationTypeNames::new(naming, op);
         let method = op.method.to_ascii_lowercase();
@@ -178,7 +220,7 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
             if matches!(schema, SchemaNode::Unknown { .. }) {
                 None
             } else {
-                success_type.as_ref().map(|t| factory_name(naming, t))
+                success_type.as_ref().map(|t| factory_names.name(t))
             }
         });
 

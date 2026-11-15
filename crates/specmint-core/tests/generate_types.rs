@@ -4,9 +4,9 @@ use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
 use specmint::adapter::parse_openapi;
-use specmint::config::{Config, EnumStyle, GenerateMode, ObjectSyntax};
+use specmint::config::{Config, GenerateMode};
 use specmint::generate::{ConfigSource, GenerateOptions, generate};
-use specmint::plugins::TypesOptions;
+use specmint::plugins::{EnumStyle, ObjectSyntax, TypesOptions};
 
 #[test]
 fn parses_fixture_schemas_and_operations() {
@@ -56,9 +56,6 @@ rename = "ModernName"
     let naming = Naming::new(cfg).unwrap();
     assert_eq!(naming.schema_type_name("pet_status"), "IPetStatusDto");
     assert_eq!(naming.schema_type_name("LegacyFoo"), "ModernName");
-    assert_eq!(naming.factory_name("Pet"), "createPet");
-    assert_eq!(naming.handler_name("list_pets"), "listPetsHandler");
-    assert_eq!(naming.zod_name("PetStatus"), "petStatusSchema");
 }
 
 #[test]
@@ -85,16 +82,16 @@ clean = true
 [naming]
 schema_case = "PascalCase"
 
-[[naming.overrides]]
-match = {{ kind = "schema_name", pattern = "Discriminator$" }}
-enum_style = "literal"
-
 [plugins.types]
 enabled = true
 file = "types.ts"
 enum_style = "enum"
 strip_readonly = true
 compact = true
+
+[[plugins.types.overrides]]
+match = {{ kind = "schema_name", pattern = "Discriminator$" }}
+enum_style = "literal"
 
 [plugins.factories]
 enabled = false
@@ -1105,4 +1102,91 @@ enabled = true
 
     assert_eq!(alias_status, "200");
     assert_eq!(handler_status, alias_status);
+}
+
+#[test]
+fn plugin_naming_options_rename_what_each_plugin_writes_and_importers_follow() {
+    let plugins = r#"
+[plugins.factories]
+enabled = true
+naming = { prefix = "make", suffix = "Fake" }
+
+[[plugins.factories.overrides]]
+match = { kind = "schema_name", pattern = "^Pet$" }
+naming = { prefix = "build" }
+
+[plugins.msw]
+enabled = true
+handlers_barrel = true
+naming = { case = "PascalCase", suffix = "Msw" }
+
+[[plugins.msw.overrides]]
+match = { kind = "operation_id", pattern = "^getPet$" }
+naming = { prefix = "msw", suffix = "" }
+
+[plugins.zod]
+enabled = true
+naming = { case = "PascalCase", suffix = "Zod" }
+"#;
+    let (dir, report) = generate_tiny(plugins, None, None);
+    report.unwrap();
+    let out = dir.path().join("generated");
+    let read = |f: &str| std::fs::read_to_string(out.join(f)).unwrap();
+
+    let factories = read("factories.ts");
+    assert!(
+        factories.contains("export function buildPetFake("),
+        "{factories}"
+    );
+    assert!(
+        factories.contains("export function makeErrorFake("),
+        "{factories}"
+    );
+    assert!(!factories.contains("function create"), "{factories}");
+
+    let handlers = read("handlers.ts");
+    assert!(
+        handlers.contains("export function ListPetsMsw("),
+        "{handlers}"
+    );
+    assert!(
+        handlers.contains("export function mswGetPet("),
+        "{handlers}"
+    );
+    assert!(
+        handlers.contains("makeListPetsQueryResponseFake"),
+        "{handlers}"
+    );
+
+    let zod = read("zod.ts");
+    assert!(zod.contains("export const PetZod ="), "{zod}");
+
+    assert_imports_resolve(&out, &["factories.ts", "handlers.ts"]);
+}
+
+#[test]
+fn naming_keys_that_moved_into_plugins_are_rejected_in_core_config() {
+    for (old, key) in [
+        ("[naming.factory]\nprefix = \"make\"\n", "factory"),
+        ("[naming.handler]\nsuffix = \"Msw\"\n", "handler"),
+        ("[naming.zod]\nsuffix = \"Zod\"\n", "zod"),
+        ("[naming]\nfactory_prefix = \"make\"\n", "factory_prefix"),
+        ("[naming]\nhandler_suffix = \"Msw\"\n", "handler_suffix"),
+        (
+            "[[naming.overrides]]\nmatch = { kind = \"schema_name\", pattern = \".\" }\nenum_style = \"literal\"\n",
+            "enum_style",
+        ),
+        (
+            "[adapter]\ndiscriminator = \"propagate\"\n",
+            "discriminator",
+        ),
+        ("[adapter]\nenum_suffix = \" \"\n", "enum_suffix"),
+    ] {
+        let (_dir, report) = generate_tiny(old, None, None);
+        let err = report.err().unwrap().to_string();
+        assert!(
+            err.contains(&format!("unknown field `{key}`")),
+            "{old}: {err}"
+        );
+    }
 }

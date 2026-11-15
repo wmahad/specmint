@@ -29,8 +29,6 @@ export interface SpecmintOutput {
 
 export interface SpecmintAdapter {
   validate?: boolean;
-  discriminator?: string;
-  enum_suffix?: string;
 }
 
 export interface SpecmintIdentNamingRule {
@@ -38,12 +36,6 @@ export interface SpecmintIdentNamingRule {
   prefix?: string;
   suffix?: string;
   preserve_valid_identifier?: boolean;
-}
-
-export interface SpecmintAffixNamingRule {
-  case?: CaseStyle;
-  prefix?: string;
-  suffix?: string;
 }
 
 export interface SpecmintEnumMemberNamingRule {
@@ -76,27 +68,30 @@ export interface SpecmintEnumMemberNamingPatch {
   preserve_all_caps?: boolean;
 }
 
+export interface SpecmintMatch {
+  kind: OverrideKind;
+  pattern: string;
+}
+
+/** An affix patch for the names whose `match` applies. */
+export interface SpecmintAffixOverride {
+  match: SpecmintMatch;
+  naming: SpecmintAffixNamingPatch;
+}
+
 export interface SpecmintNamingOverride {
-  match: { kind: OverrideKind; pattern: string };
+  match: SpecmintMatch;
   /** Replace the resolved schema/type name entirely. */
   rename?: string;
-  enum_style?: EnumStyle;
-  /** Per-schema object declaration style (`"type"` | `"interface"`). */
-  syntax?: ObjectSyntax;
   schema?: SpecmintIdentNamingPatch;
   enum_member?: SpecmintEnumMemberNamingPatch;
   operation?: SpecmintIdentNamingPatch;
-  factory?: SpecmintAffixNamingPatch;
-  handler?: SpecmintAffixNamingPatch;
 }
 
 export interface SpecmintNaming {
   schema?: SpecmintIdentNamingRule;
   enum_member?: SpecmintEnumMemberNamingRule;
   operation?: SpecmintIdentNamingRule;
-  factory?: SpecmintAffixNamingRule;
-  handler?: SpecmintAffixNamingRule;
-  zod?: SpecmintAffixNamingRule;
   overrides?: SpecmintNamingOverride[];
 }
 
@@ -108,12 +103,26 @@ export interface SpecmintTypesPlugin {
   syntax?: ObjectSyntax;
   strip_readonly?: boolean;
   compact?: boolean;
+  /** Per-schema `enum_style` / `syntax`, matched by schema name. */
+  overrides?: {
+    match: SpecmintMatch;
+    enum_style?: EnumStyle;
+    /** Per-schema object declaration style (`"type"` | `"interface"`). */
+    syntax?: ObjectSyntax;
+  }[];
 }
 
 export interface SpecmintFactoriesPlugin {
   enabled?: boolean;
   file?: string;
   seed?: number;
+  /**
+   * `prefix + type name + suffix`; the type name is used as is, so `case` has no effect.
+   * Keys left out keep their defaults (prefix `"create"`, no suffix).
+   */
+  naming?: SpecmintAffixNamingPatch;
+  /** Matched (`kind: "schema_name"`) against the type name the factory builds. */
+  overrides?: SpecmintAffixOverride[];
 }
 
 export interface SpecmintMswPlugin {
@@ -126,12 +135,24 @@ export interface SpecmintMswPlugin {
   parser?: string;
   base_url?: string;
   handlers_barrel?: boolean;
+  /**
+   * `prefix + operation id cased by case + suffix`.
+   * Keys left out keep their defaults (`"CamelCase"`, no prefix, `"Handler"`).
+   */
+  naming?: SpecmintAffixNamingPatch;
+  /** Matched (`kind: "operation_id"`) against the operation id. */
+  overrides?: SpecmintAffixOverride[];
 }
 
 export interface SpecmintZodPlugin {
   enabled?: boolean;
   file?: string;
   inferred?: boolean;
+  /**
+   * `prefix + type name cased by case + suffix`.
+   * Keys left out keep their defaults (`"CamelCase"`, no prefix, `"Schema"`).
+   */
+  naming?: SpecmintAffixNamingPatch;
 }
 
 /** One section per plugin, keyed by plugin name. */

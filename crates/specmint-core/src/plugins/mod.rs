@@ -12,9 +12,12 @@ mod zod;
 
 use crate::plugin::Plugin;
 
-pub use factories::{FactoriesOptions, FactoriesPlugin, factory_name};
-pub use msw::{MswOptions, MswPlugin};
-pub use types::{OperationTypeNames, TypesOptions, TypesPlugin};
+pub use factories::{FactoriesOptions, FactoriesPlugin, FactoryNames};
+pub use msw::{HandlerNames, MswOptions, MswPlugin};
+pub use types::{
+    EnumStyle, ObjectSyntax, OperationTypeNames, TypeStyles, TypesOptions, TypesOverride,
+    TypesPlugin,
+};
 pub use zod::{ZodOptions, ZodPlugin};
 
 /// How one generated file imports another: `"models/api.ts"` → `"./models/api"`.

@@ -36,12 +36,12 @@ banner = """
 
 [adapter]
 validate = false
-discriminator = "propagate"
-enum_suffix = " "
 
 [naming]
-# Kind policies — plugins ask Naming; they do not hardcode casing.
-# Legacy flat keys (schema_case, factory_prefix, …) still work.
+# Naming shared by every plugin: schema, enum-member and operation names.
+# Plugins ask Naming; they do not hardcode casing. Names only one plugin
+# writes (factories, handlers, zod schemas) are set in that plugin's section.
+# Legacy flat keys (schema_case, operation_case) still work.
 
 [naming.schema]
 case = "PascalCase"
@@ -58,25 +58,13 @@ preserve_all_caps = true
 [naming.operation]
 case = "PascalCase"
 
-[naming.factory]
-prefix = "create"
-
-[naming.handler]
-case = "CamelCase"
-suffix = "Handler"
-
-[naming.zod]
-case = "CamelCase"
-suffix = "Schema"
-
-[[naming.overrides]]
-match = { kind = "schema_name", pattern = "Discriminator$" }
-enum_style = "literal"
-# Examples:
-# rename = "MyCustomName"
+# [[naming.overrides]]
+# match = { kind = "schema_name", pattern = "^LegacyPet$" }
+# rename = "Pet"
+# Other fields:
 # schema = { prefix = "I", suffix = "Dto" }
 # enum_member = { strategy = "case", case = "PascalCase", digit_prefix = false }
-# syntax = "interface"   # this schema only
+# operation = { prefix = "Api" }   # with kind = "operation_id"
 
 [plugins.types]
 enabled = true
@@ -88,18 +76,35 @@ syntax = "type"
 strip_readonly = true
 compact = true
 
+[[plugins.types.overrides]]
+match = { kind = "schema_name", pattern = "Discriminator$" }
+enum_style = "literal"
+# syntax = "interface"   # these schemas only
+
 [plugins.factories]
 enabled = false
 file = "factories.ts"
 seed = 2
+# prefix + type name + suffix (the type name is used as is)
+naming = { prefix = "create", suffix = "" }
+
+# [[plugins.factories.overrides]]
+# match = { kind = "schema_name", pattern = "^Pet$" }   # matched against the type name
+# naming = { prefix = "build" }
 
 [plugins.msw]
 enabled = false
 file = "handlers.ts"
 parser = "faker" # "faker" needs [plugins.factories] on; "data" does not
 base_url = "*"
+naming = { case = "CamelCase", prefix = "", suffix = "Handler" }
+
+# [[plugins.msw.overrides]]
+# match = { kind = "operation_id", pattern = "^getPet$" }
+# naming = { suffix = "Msw" }
 
 [plugins.zod]
 enabled = false
 file = "zod.ts"
 inferred = true
+naming = { case = "CamelCase", prefix = "", suffix = "Schema" }

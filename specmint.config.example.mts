@@ -44,12 +44,11 @@ export default defineConfig({
 
   adapter: {
     validate: false,
-    discriminator: "propagate",
-    enum_suffix: " ",
   },
 
   naming: {
-    // Kind policies — plugins ask Naming; they do not hardcode casing.
+    // Naming shared by every plugin: schema, enum-member and operation names.
+    // Names only one plugin writes are set in that plugin's section below.
     schema: {
       case: "PascalCase",
       // prefix: "",
@@ -65,28 +64,16 @@ export default defineConfig({
     operation: {
       case: "PascalCase",
     },
-    factory: {
-      prefix: "create",
-    },
-    handler: {
-      case: "CamelCase",
-      suffix: "Handler",
-    },
-    zod: {
-      case: "CamelCase",
-      suffix: "Schema",
-    },
-    overrides: [
-      {
-        match: { kind: "schema_name", pattern: "Discriminator$" },
-        enum_style: "literal",
-        // Examples:
-        // rename: "MyCustomName",
-        // schema: { prefix: "I", suffix: "Dto" },
-        // enum_member: { strategy: "case", case: "PascalCase", digit_prefix: false },
-        // syntax: "interface", // this schema only
-      },
-    ],
+    // overrides: [
+    //   {
+    //     match: { kind: "schema_name", pattern: "^LegacyPet$" },
+    //     rename: "Pet",
+    //     // Other fields:
+    //     // schema: { prefix: "I", suffix: "Dto" },
+    //     // enum_member: { strategy: "case", case: "PascalCase", digit_prefix: false },
+    //     // operation: { prefix: "Api" }, // with kind: "operation_id"
+    //   },
+    // ],
   },
 
   plugins: {
@@ -99,22 +86,35 @@ export default defineConfig({
       syntax: "type",
       strip_readonly: true,
       compact: true,
+      overrides: [
+        {
+          match: { kind: "schema_name", pattern: "Discriminator$" },
+          enum_style: "literal",
+          // syntax: "interface", // these schemas only
+        },
+      ],
     },
     factories: {
       enabled: false,
       file: "factories.ts",
       seed: 2,
+      // prefix + type name + suffix (the type name is used as is)
+      naming: { prefix: "create", suffix: "" },
+      // overrides: [{ match: { kind: "schema_name", pattern: "^Pet$" }, naming: { prefix: "build" } }],
     },
     msw: {
       enabled: false,
       file: "handlers.ts",
       parser: "faker", // "faker" needs factories on; "data" does not
       base_url: "*",
+      naming: { case: "CamelCase", prefix: "", suffix: "Handler" },
+      // overrides: [{ match: { kind: "operation_id", pattern: "^getPet$" }, naming: { suffix: "Msw" } }],
     },
     zod: {
       enabled: false,
       file: "zod.ts",
       inferred: true,
+      naming: { case: "CamelCase", prefix: "", suffix: "Schema" },
     },
   },
 });

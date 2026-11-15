@@ -8,48 +8,147 @@ mod case;
 
 use regex::Regex;
 
+use serde::Deserialize;
+
 use crate::config::{
-    AffixNamingRule, CaseStyle, EnumMemberNamingRule, EnumStyle, IdentNamingRule, NamingConfig,
-    NamingOverride, OverrideKind,
+    AffixNamingPatch, AffixNamingRule, CaseStyle, EnumMemberNamingRule, IdentNamingRule,
+    NamingConfig, NamingOverride, OverrideKind, OverrideMatch,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 pub use case::{
     apply_ident_rule, enum_member_name as enum_member_name_with_rule, is_valid_ts_identifier,
     schema_type_name, to_case,
 };
 
+/// An override entry: something that applies when its `match` does.
+pub trait Override {
+    fn target(&self) -> &OverrideMatch;
+}
+
+impl Override for NamingOverride {
+    fn target(&self) -> &OverrideMatch {
+        &self.target
+    }
+}
+
+/// Override entries with their patterns compiled, in config order. Core uses
+/// it for `[[naming.overrides]]`; plugins use it for their own overrides.
+#[derive(Debug, Clone)]
+pub struct OverrideSet<O> {
+    entries: Vec<(Regex, O)>,
+}
+
+impl<O: Override> OverrideSet<O> {
+    /// `context` names where the overrides come from, for errors
+    /// (`"naming.overrides"`, `"plugins.<name>.overrides"`).
+    pub fn new(overrides: Vec<O>, context: &str) -> Result<Self> {
+        let entries = overrides
+            .into_iter()
+            .map(|ovr| {
+                let pattern = &ovr.target().pattern;
+                let re = Regex::new(pattern).map_err(|e| {
+                    Error::config(format!("{context}: invalid regex {pattern:?}: {e}"))
+                })?;
+                Ok((re, ovr))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { entries })
+    }
+
+    /// The overrides of `kind` whose pattern matches `name`, in config order.
+    pub fn matching<'a>(
+        &'a self,
+        kind: OverrideKind,
+        name: &'a str,
+    ) -> impl Iterator<Item = &'a O> + 'a {
+        self.entries
+            .iter()
+            .filter(move |(re, ovr)| ovr.target().kind == kind && re.is_match(name))
+            .map(|(_, ovr)| ovr)
+    }
+}
+
+impl<O> Default for OverrideSet<O> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+/// `{ match, naming }`: an affix patch for the names whose `match` applies.
+/// Plugins use it for the overrides of the names they own.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AffixOverride {
+    #[serde(rename = "match")]
+    pub target: OverrideMatch,
+    pub naming: AffixNamingPatch,
+}
+
+impl Override for AffixOverride {
+    fn target(&self) -> &OverrideMatch {
+        &self.target
+    }
+}
+
+/// An affix rule plus the overrides that patch it for some names: the names
+/// one plugin owns, matched by one kind (schema name or operation id).
+#[derive(Debug)]
+pub struct AffixNames {
+    rule: AffixNamingRule,
+    kind: OverrideKind,
+    overrides: OverrideSet<AffixOverride>,
+}
+
+impl AffixNames {
+    /// `context` names where the overrides come from, for errors.
+    pub fn new(
+        rule: AffixNamingRule,
+        kind: OverrideKind,
+        overrides: Vec<AffixOverride>,
+        context: &str,
+    ) -> Result<Self> {
+        Ok(Self {
+            rule,
+            kind,
+            overrides: OverrideSet::new(overrides, context)?,
+        })
+    }
+
+    /// The rule for `name`, after every override that matches it.
+    pub fn rule_for(&self, name: &str) -> AffixNamingRule {
+        self.overrides
+            .matching(self.kind, name)
+            .fold(self.rule.clone(), |rule, ovr| rule.apply_patch(&ovr.naming))
+    }
+}
+
+/// `prefix + base cased by rule.case + suffix`.
+pub fn apply_affix_rule(base: &str, rule: &AffixNamingRule) -> String {
+    format!("{}{}{}", rule.prefix, to_case(base, rule.case), rule.suffix)
+}
+
 #[derive(Debug, Clone)]
 pub struct Naming {
     config: NamingConfig,
-    override_regexes: Vec<(OverrideKind, Regex, NamingOverride)>,
+    overrides: OverrideSet<NamingOverride>,
 }
 
 impl Naming {
     pub fn new(config: NamingConfig) -> Result<Self> {
         let config = config.normalize();
-        let mut override_regexes = Vec::new();
-        for ovr in &config.overrides {
-            let re = Regex::new(&ovr.target.pattern)
-                .map_err(|e| crate::error::Error::config(format!("bad override regex: {e}")))?;
-            override_regexes.push((ovr.target.kind, re, ovr.clone()));
-        }
-        Ok(Self {
-            config,
-            override_regexes,
-        })
-    }
-
-    fn matching_overrides(&self, kind: OverrideKind, name: &str) -> Vec<&NamingOverride> {
-        self.override_regexes
-            .iter()
-            .filter_map(|(k, re, ovr)| (*k == kind && re.is_match(name)).then_some(ovr))
-            .collect()
+        let overrides = OverrideSet::new(config.overrides.clone(), "naming.overrides")?;
+        Ok(Self { config, overrides })
     }
 
     fn schema_rule(&self, schema_name: &str) -> IdentNamingRule {
         let mut rule = self.config.schema.clone();
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_name) {
+        for ovr in self
+            .overrides
+            .matching(OverrideKind::SchemaName, schema_name)
+        {
             if let Some(patch) = &ovr.schema {
                 rule = rule.apply_patch(patch);
             }
@@ -59,7 +158,10 @@ impl Naming {
 
     fn enum_member_rule(&self, schema_or_type_hint: &str) -> EnumMemberNamingRule {
         let mut rule = self.config.enum_member.clone();
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_or_type_hint) {
+        for ovr in self
+            .overrides
+            .matching(OverrideKind::SchemaName, schema_or_type_hint)
+        {
             if let Some(patch) = &ovr.enum_member {
                 rule = rule.apply_patch(patch);
             }
@@ -69,7 +171,10 @@ impl Naming {
 
     fn operation_rule(&self, operation_id: &str) -> IdentNamingRule {
         let mut rule = self.config.operation.clone();
-        for ovr in self.matching_overrides(OverrideKind::OperationId, operation_id) {
+        for ovr in self
+            .overrides
+            .matching(OverrideKind::OperationId, operation_id)
+        {
             if let Some(patch) = &ovr.operation {
                 rule = rule.apply_patch(patch);
             }
@@ -77,31 +182,13 @@ impl Naming {
         rule
     }
 
-    fn factory_rule(&self, type_name: &str) -> AffixNamingRule {
-        let mut rule = self.config.factory.clone();
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, type_name) {
-            if let Some(patch) = &ovr.factory {
-                rule = rule.apply_patch(patch);
-            }
-        }
-        rule
-    }
-
-    fn handler_rule(&self, operation_id: &str) -> AffixNamingRule {
-        let mut rule = self.config.handler.clone();
-        for ovr in self.matching_overrides(OverrideKind::OperationId, operation_id) {
-            if let Some(patch) = &ovr.handler {
-                rule = rule.apply_patch(patch);
-            }
-        }
-        rule
-    }
-
     pub fn schema_type_name(&self, name: &str) -> String {
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, name) {
-            if let Some(rename) = &ovr.rename {
-                return rename.clone();
-            }
+        if let Some(rename) = self
+            .overrides
+            .matching(OverrideKind::SchemaName, name)
+            .find_map(|ovr| ovr.rename.as_ref())
+        {
+            return rename.clone();
         }
         apply_ident_rule(name, &self.schema_rule(name))
     }
@@ -120,52 +207,15 @@ impl Naming {
         case::enum_member_name(type_name, raw, &self.enum_member_rule(schema_name))
     }
 
-    pub fn factory_name(&self, type_name: &str) -> String {
-        let rule = self.factory_rule(type_name);
-        format!("{}{type_name}{}", rule.prefix, rule.suffix)
-    }
-
-    pub fn handler_name(&self, operation_id: &str) -> String {
-        let rule = self.handler_rule(operation_id);
-        let base = to_case(operation_id, rule.case);
-        format!("{}{base}{}", rule.prefix, rule.suffix)
-    }
-
-    pub fn zod_name(&self, type_name: &str) -> String {
-        let rule = &self.config.zod;
-        let base = to_case(type_name, rule.case);
-        format!("{}{base}{}", rule.prefix, rule.suffix)
-    }
-
     pub fn operation_type_base(&self, operation_id: &str) -> String {
-        for ovr in self.matching_overrides(OverrideKind::OperationId, operation_id) {
-            if let Some(rename) = &ovr.rename {
-                return rename.clone();
-            }
+        if let Some(rename) = self
+            .overrides
+            .matching(OverrideKind::OperationId, operation_id)
+            .find_map(|ovr| ovr.rename.as_ref())
+        {
+            return rename.clone();
         }
         apply_ident_rule(operation_id, &self.operation_rule(operation_id))
-    }
-
-    pub fn enum_style_for_schema(&self, schema_name: &str, default: EnumStyle) -> EnumStyle {
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_name) {
-            if let Some(style) = ovr.enum_style {
-                return style;
-            }
-        }
-        default
-    }
-
-    pub fn object_syntax_for_schema(
-        &self,
-        schema_name: &str,
-        default: crate::config::ObjectSyntax,
-    ) -> crate::config::ObjectSyntax {
-        for ovr in self.matching_overrides(OverrideKind::SchemaName, schema_name) {
-            if let Some(syntax) = ovr.syntax {
-                return syntax;
-            }
-        }
-        default
     }
 }
 

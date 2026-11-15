@@ -5,7 +5,7 @@
 use specmint::adapter::{ParameterLocation, ParsedSpec, parse_openapi};
 use specmint::config::NamingConfig;
 use specmint::naming::Naming;
-use specmint::plugins::{FactoriesOptions, OperationTypeNames, TypesOptions, factory_name};
+use specmint::plugins::{FactoriesOptions, OperationTypeNames, TypesOptions};
 
 const SPEC: &str = r#"
 openapi: 3.0.3
@@ -145,7 +145,10 @@ fn plugins_expose_the_import_path_of_their_file() {
 #[test]
 fn the_factories_plugin_names_the_factory_for_a_type() {
     assert_eq!(
-        factory_name(&default_naming(), "GetPetQueryResponse"),
+        FactoriesOptions::default()
+            .names()
+            .unwrap()
+            .name("GetPetQueryResponse"),
         "createGetPetQueryResponse"
     );
 }

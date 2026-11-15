@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use crate::adapter::{EnumValue, ParsedSpec, PrimitiveKind, SchemaNode};
 use serde::Deserialize;
 
-use crate::config::Config;
+use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config};
 use crate::error::Result;
-use crate::naming::Naming;
+use crate::naming::{Naming, apply_affix_rule};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 
 pub struct ZodPlugin;
@@ -23,6 +23,18 @@ pub struct ZodOptions {
     pub file: String,
     #[serde(default = "default_true")]
     pub inferred: bool,
+    /// Schema constant names: `prefix + type name cased by case + suffix`.
+    /// Keys left out keep their defaults (camelCase, no prefix, `Schema`).
+    #[serde(default)]
+    pub naming: AffixNamingPatch,
+}
+
+fn default_naming() -> AffixNamingRule {
+    AffixNamingRule {
+        case: CaseStyle::CamelCase,
+        prefix: String::new(),
+        suffix: "Schema".into(),
+    }
 }
 
 fn default_file() -> String {
@@ -39,6 +51,7 @@ impl Default for ZodOptions {
             enabled: false,
             file: default_file(),
             inferred: true,
+            naming: AffixNamingPatch::default(),
         }
     }
 }
@@ -46,6 +59,11 @@ impl Default for ZodOptions {
 impl ZodOptions {
     pub fn from_config(config: &Config) -> Result<Self> {
         config.plugins.section_or_default(ZodPlugin.name())
+    }
+
+    /// The name of the zod schema for `type_name` (`petSchema`).
+    pub fn schema_name(&self, type_name: &str) -> String {
+        apply_affix_rule(type_name, &default_naming().apply_patch(&self.naming))
     }
 }
 
@@ -64,7 +82,7 @@ impl Plugin for ZodPlugin {
 
     fn generate(&self, ctx: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
         let options = ZodOptions::from_config(ctx.config)?;
-        let body = render_zod(ctx.spec, ctx.naming, options.inferred)?;
+        let body = render_zod(ctx.spec, ctx.naming, &options)?;
         Ok(vec![OutputFile {
             relative_path: PathBuf::from(options.file),
             contents: body,
@@ -72,17 +90,17 @@ impl Plugin for ZodPlugin {
     }
 }
 
-fn render_zod(spec: &ParsedSpec, naming: &Naming, inferred: bool) -> Result<String> {
+fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<String> {
     let mut out = String::new();
     let _ = writeln!(out, "import {{ z }} from 'zod';");
     out.push('\n');
 
     // Forward-declare refs with z.lazy by emitting schemas in order; for cycles use lazy.
     for (name, schema) in &spec.schemas {
-        let zod_name = naming.zod_name(&naming.schema_type_name(name));
-        let expr = schema_to_zod(schema, naming, true)?;
+        let zod_name = zod.schema_name(&naming.schema_type_name(name));
+        let expr = schema_to_zod(schema, naming, zod, true)?;
         let _ = writeln!(out, "export const {zod_name} = {expr};");
-        if inferred {
+        if zod.inferred {
             let type_name = naming.schema_type_name(name);
             let _ = writeln!(
                 out,
@@ -95,11 +113,16 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, inferred: bool) -> Result<Stri
     Ok(out)
 }
 
-fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Result<String> {
+fn schema_to_zod(
+    schema: &SchemaNode,
+    naming: &Naming,
+    zod: &ZodOptions,
+    top_level: bool,
+) -> Result<String> {
     let _ = top_level;
     let base = match schema {
         SchemaNode::Ref { name } => {
-            let zod_name = naming.zod_name(&naming.schema_type_name(name));
+            let zod_name = zod.schema_name(&naming.schema_type_name(name));
             format!("z.lazy(() => {zod_name})")
         }
         SchemaNode::Primitive {
@@ -174,7 +197,7 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
         SchemaNode::Array {
             items, nullable, ..
         } => {
-            let inner = schema_to_zod(items, naming, false)?;
+            let inner = schema_to_zod(items, naming, zod, false)?;
             let mut expr = format!("z.array({inner})");
             if *nullable {
                 expr = format!("{expr}.nullable()");
@@ -190,7 +213,7 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
         } => {
             let mut fields = Vec::new();
             for (prop, prop_schema) in properties {
-                let mut field = schema_to_zod(prop_schema, naming, false)?;
+                let mut field = schema_to_zod(prop_schema, naming, zod, false)?;
                 if !required.iter().any(|r| r == prop) {
                     field = format!("{field}.optional()");
                 }
@@ -198,7 +221,7 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
             }
             let mut expr = format!("z.object({{\n{}\n}})", fields.join(",\n"));
             if let Some(ap) = additional_properties {
-                let ap_expr = schema_to_zod(ap, naming, false)?;
+                let ap_expr = schema_to_zod(ap, naming, zod, false)?;
                 expr = format!("{expr}.catchall({ap_expr})");
             }
             if *nullable {
@@ -210,9 +233,9 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
             if items.is_empty() {
                 return Ok("z.unknown()".into());
             }
-            let mut expr = schema_to_zod(&items[0], naming, false)?;
+            let mut expr = schema_to_zod(&items[0], naming, zod, false)?;
             for item in items.iter().skip(1) {
-                let next = schema_to_zod(item, naming, false)?;
+                let next = schema_to_zod(item, naming, zod, false)?;
                 expr = format!("z.intersection({expr}, {next})");
             }
             if *nullable {
@@ -229,7 +252,7 @@ fn schema_to_zod(schema: &SchemaNode, naming: &Naming, top_level: bool) -> Resul
             }
             let parts: Result<Vec<_>> = items
                 .iter()
-                .map(|i| schema_to_zod(i, naming, false))
+                .map(|i| schema_to_zod(i, naming, zod, false))
                 .collect();
             let parts = parts?;
             let mut expr = if parts.len() == 1 {

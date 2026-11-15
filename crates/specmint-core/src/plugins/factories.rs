@@ -14,9 +14,9 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 
 use crate::adapter::SchemaNode;
-use crate::config::Config;
+use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config, OverrideKind};
 use crate::error::Result;
-use crate::naming::Naming;
+use crate::naming::{AffixNames, AffixOverride, Naming};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
 use crate::plugins::cycles::{build_ref_graph, find_circular_names};
 use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
@@ -34,6 +34,36 @@ pub struct FactoriesOptions {
     pub file: String,
     #[serde(default = "default_seed")]
     pub seed: u64,
+    /// Factory names: `prefix + type name + suffix`. The type name is used as
+    /// is, so `case` has no effect. Keys left out keep their defaults
+    /// (prefix `create`, no suffix).
+    #[serde(default)]
+    pub naming: AffixNamingPatch,
+    /// Per-type naming patches, matched (`kind = "schema_name"`) against the
+    /// type name the factory builds.
+    #[serde(default)]
+    pub overrides: Vec<AffixOverride>,
+}
+
+/// The factory name for each type, after overrides.
+#[derive(Debug)]
+pub struct FactoryNames(AffixNames);
+
+impl FactoryNames {
+    /// The name of the factory that builds `type_name` (`createPet`). The type
+    /// name is used as is: factories ignore `case`.
+    pub fn name(&self, type_name: &str) -> String {
+        let rule = self.0.rule_for(type_name);
+        format!("{}{type_name}{}", rule.prefix, rule.suffix)
+    }
+}
+
+fn default_naming() -> AffixNamingRule {
+    AffixNamingRule {
+        case: CaseStyle::PascalCase,
+        prefix: "create".into(),
+        suffix: String::new(),
+    }
 }
 
 fn default_file() -> String {
@@ -50,6 +80,8 @@ impl Default for FactoriesOptions {
             enabled: false,
             file: default_file(),
             seed: default_seed(),
+            naming: AffixNamingPatch::default(),
+            overrides: Vec::new(),
         }
     }
 }
@@ -63,11 +95,15 @@ impl FactoriesOptions {
     pub fn import_path(&self) -> String {
         super::relative_import(&self.file)
     }
-}
 
-/// The name of the factory that builds `type_name` (`createPet`).
-pub fn factory_name(naming: &Naming, type_name: &str) -> String {
-    naming.factory_name(type_name)
+    pub fn names(&self) -> Result<FactoryNames> {
+        Ok(FactoryNames(AffixNames::new(
+            default_naming().apply_patch(&self.naming),
+            OverrideKind::SchemaName,
+            self.overrides.clone(),
+            "plugins.factories.overrides",
+        )?))
+    }
 }
 
 impl Plugin for FactoriesPlugin {
@@ -110,11 +146,13 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
     let schemas: &SchemaMap = &spec.schemas;
     let graph = build_ref_graph(schemas);
     let circular = find_circular_names(&graph);
+    let factory_names = cfg.names()?;
     let write_ctx = FactoryWriteCtx {
         naming,
         schemas,
         graph: &graph,
         circular: &circular,
+        factory_names: &factory_names,
     };
 
     let mut type_names: IndexSet<String> = IndexSet::new();
@@ -144,7 +182,7 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
 
     for (schema_name, schema) in schemas {
         let type_name = naming.schema_type_name(schema_name);
-        let factory = factory_name(naming, &type_name);
+        let factory = factory_names.name(&type_name);
         write_schema_factory(
             &mut out,
             &factory,
@@ -160,15 +198,15 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
         let names = OperationTypeNames::new(naming, operation);
         for (status_code, schema) in &operation.responses {
             let type_name = names.response(status_code);
-            let factory = factory_name(naming, &type_name);
+            let factory = factory_names.name(&type_name);
             write_schema_factory(&mut out, &factory, &type_name, None, schema, &write_ctx)?;
             out.push('\n');
         }
         if let (Some(type_name), Some(status_code)) =
             (names.success_response(), names.success_status())
         {
-            let factory = factory_name(naming, &type_name);
-            let status_factory = factory_name(naming, &names.response(status_code));
+            let factory = factory_names.name(&type_name);
+            let status_factory = factory_names.name(&names.response(status_code));
             let _ = writeln!(
                 out,
                 "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
@@ -178,7 +216,7 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
             out.push('\n');
         }
         if let (Some(type_name), Some(request_body)) = (names.request(), &operation.request_body) {
-            let factory = factory_name(naming, &type_name);
+            let factory = factory_names.name(&type_name);
             write_schema_factory(
                 &mut out,
                 &factory,
@@ -200,6 +238,7 @@ struct FactoryWriteCtx<'a> {
     schemas: &'a SchemaMap,
     graph: &'a crate::plugins::cycles::RefGraph,
     circular: &'a IndexSet<String>,
+    factory_names: &'a FactoryNames,
 }
 
 fn write_schema_factory(
@@ -231,7 +270,7 @@ fn write_schema_factory(
         }
         SchemaNode::Ref { name } => {
             let target_type_name = naming.schema_type_name(name);
-            let target_factory = factory_name(naming, &target_type_name);
+            let target_factory = ctx.factory_names.name(&target_type_name);
             let is_enum = matches!(schemas.get(name), Some(SchemaNode::Enum { .. }));
             if is_enum {
                 let _ = writeln!(
@@ -254,11 +293,12 @@ fn write_schema_factory(
                 out,
                 "export function {factory}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
-            let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular);
+            let faker_ctx =
+                FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular, ctx.factory_names);
             let item_expr = match items.as_ref() {
                 SchemaNode::Ref { name } => {
                     let item_type_name = naming.schema_type_name(name);
-                    let item_factory = factory_name(naming, &item_type_name);
+                    let item_factory = ctx.factory_names.name(&item_type_name);
                     format!("{item_factory}()")
                 }
                 other => faker_expr(other, naming, schemas, faker_ctx),
@@ -274,7 +314,8 @@ fn write_schema_factory(
             let _ = writeln!(out, "}}");
         }
         _ => {
-            let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular);
+            let faker_ctx =
+                FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular, ctx.factory_names);
             let defaults = faker_expr(schema, naming, schemas, faker_ctx);
             let paginated = is_paginated_list_schema(schema);
             let _ = writeln!(
