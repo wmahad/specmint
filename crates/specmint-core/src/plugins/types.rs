@@ -41,7 +41,6 @@ pub struct TypesOptions {
     pub overrides: Vec<TypesOverride>,
 }
 
-/// How enum schemas are declared.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EnumStyle {
@@ -80,7 +79,6 @@ impl Override for TypesOverride {
     }
 }
 
-/// The enum style and object syntax for each schema, after overrides.
 #[derive(Debug)]
 pub struct TypeStyles {
     enum_style: EnumStyle,
@@ -147,7 +145,6 @@ impl TypesOptions {
         })
     }
 
-    /// How other generated files import the types file.
     pub fn import_path(&self) -> String {
         super::relative_import(&self.file)
     }
