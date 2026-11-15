@@ -4,5 +4,6 @@ specmint ships as a single npm package, `specmint`, with every plugin built into
 
 ## Consequences
 
-- Plugins are written in Rust by the specmint maintainers. There is no API for third-party JavaScript plugins in v1.
+- Plugins are written in Rust by the specmint maintainers. There is no API for third-party JavaScript plugins in v1; one is planned after v1, alongside options that take JavaScript functions (kubb's `resolver` and `macros`). v1 covers those needs with declarative options.
+- Reaching parity with kubb's plugins (clients, query hooks, cypress, mcp, redoc) adds more built-in plugins to the same package, not separate packages.
 - Splitting the Rust code into a crate per plugin is fine and planned; that split is internal and does not change what users install.

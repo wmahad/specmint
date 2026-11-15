@@ -1,14 +1,15 @@
 # specmint
 
-OpenAPI → TypeScript artifacts generator (Rust core, napi-rs Node bindings).
+OpenAPI → TypeScript code generator with a Rust core and Node bindings. A port of [kubb](https://kubb.dev), aiming for feature parity with kubb v5 in v1.
 
 | Output                | Purpose                                |
 | --------------------- | -------------------------------------- |
 | `types.ts`            | Types, enums, operation helpers        |
 | `factories.ts`        | Faker `createX()` factories            |
 | `handlers.ts`         | MSW handlers (optional Zod via config) |
+| `zod.ts`              | Zod schemas                            |
 
-Not an SDK generator — no RTK Query, fetch clients, or React hooks.
+Planned for v1, to match kubb's plugins: HTTP clients (fetch and axios), TanStack Query hooks for React and Vue, SWR hooks, Cypress request helpers, an MCP server generator and Redoc API docs. All of them ship inside the one `specmint` package and are switched on in config.
 
 ## Install
 
