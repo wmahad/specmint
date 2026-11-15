@@ -6,7 +6,7 @@
 //! dependencies and filters them generically, so adding a plugin never needs a
 //! change here.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::adapter::ParsedSpec;
@@ -27,15 +27,41 @@ pub struct PluginContext<'a> {
     pub spec: &'a ParsedSpec,
 }
 
+/// A plugin dependency that applies with the current config: a plugin that
+/// must be on for this plugin's output to work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveDependency {
+    /// Name of the plugin depended on.
+    pub plugin: &'static str,
+    /// Another way to fix the config, besides switching the plugin on, written
+    /// to finish the sentence "Switch on `x`, or …" (e.g. "set `parser = \"data\"`
+    /// in [plugins.msw]").
+    pub alternative: Option<String>,
+}
+
 pub trait Plugin: Send + Sync {
     /// The plugin's name: its key under `plugins` in the config and its id in
     /// `--plugins`.
     fn name(&self) -> &'static str;
 
-    /// Names of the plugins whose output this plugin's output imports. They run
-    /// first.
+    /// Every plugin this plugin can need. They run first.
     fn dependencies(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// The dependencies that apply with this config, because this plugin's
+    /// output imports theirs. Each must be one of [`Plugin::dependencies`].
+    /// When one is off the run stops; specmint never switches a plugin on by
+    /// itself. Defaults to every dependency.
+    fn active_dependencies(&self, _config: &Config) -> Result<Vec<ActiveDependency>> {
+        Ok(self
+            .dependencies()
+            .iter()
+            .map(|plugin| ActiveDependency {
+                plugin,
+                alternative: None,
+            })
+            .collect())
     }
 
     /// Whether the config switches this plugin on.
@@ -73,7 +99,7 @@ impl PluginRegistry {
     /// The plugins to run: those the config switches on, minus test-data plugins
     /// in `--mode types`. A `filter` (from `--plugins`) replaces the config's
     /// on/off switches. Config sections and filter entries must name a known
-    /// plugin.
+    /// plugin, and every chosen plugin's active dependencies must be chosen too.
     pub fn select(
         &self,
         config: &Config,
@@ -94,21 +120,28 @@ impl PluginRegistry {
         };
 
         let mut selected = Vec::new();
+        let mut off = HashMap::new();
         for plugin in &self.plugins {
             // Every plugin parses its options, so a typo in a plugin that ends
             // up filtered out still fails the run.
             let on_in_config = plugin.enabled(config)?;
-            let on = match &filter {
-                Some(names) => names.contains(plugin.name()),
-                None => {
-                    on_in_config
-                        && !(mode == Some(GenerateMode::Types) && plugin.writes_test_data())
+            let reason = match &filter {
+                Some(names) if !names.contains(plugin.name()) => Some(OffBecause::NotInFilter),
+                Some(_) => None,
+                None if !on_in_config => Some(OffBecause::Config),
+                None if mode == Some(GenerateMode::Types) && plugin.writes_test_data() => {
+                    Some(OffBecause::TypesMode)
                 }
+                None => None,
             };
-            if on {
-                selected.push(plugin.as_ref());
+            match reason {
+                Some(reason) => {
+                    off.insert(plugin.name(), reason);
+                }
+                None => selected.push(plugin.as_ref()),
             }
         }
+        check_active_dependencies(&selected, &off, config)?;
         Ok(Selection { plugins: selected })
     }
 
@@ -122,6 +155,64 @@ impl PluginRegistry {
             known.join(", ")
         )))
     }
+}
+
+/// Why a plugin is not in a run, which decides how to fix a dependency on it.
+#[derive(Debug, Clone, Copy)]
+enum OffBecause {
+    Config,
+    NotInFilter,
+    TypesMode,
+}
+
+impl OffBecause {
+    /// `(why, fix)`, e.g. `("which is off", "Switch on `x`")`.
+    fn explain(self, plugin: &str) -> (&'static str, String) {
+        match self {
+            Self::Config => ("which is off", format!("Switch on `{plugin}`")),
+            Self::NotInFilter => (
+                "which is not in --plugins",
+                format!("Add `{plugin}` to --plugins"),
+            ),
+            Self::TypesMode => (
+                "which --mode types skips",
+                "Run without --mode types".to_string(),
+            ),
+        }
+    }
+}
+
+fn check_active_dependencies(
+    selected: &[&dyn Plugin],
+    off: &HashMap<&'static str, OffBecause>,
+    config: &Config,
+) -> Result<()> {
+    for plugin in selected {
+        for dependency in plugin.active_dependencies(config)? {
+            if !plugin.dependencies().contains(&dependency.plugin) {
+                return Err(Error::plugin(
+                    plugin.name(),
+                    format!(
+                        "depends on `{0}` with this config, but `{0}` is not in its dependencies()",
+                        dependency.plugin
+                    ),
+                ));
+            }
+            let Some(reason) = off.get(dependency.plugin) else {
+                continue;
+            };
+            let (why, fix) = reason.explain(dependency.plugin);
+            let fix = match &dependency.alternative {
+                Some(alternative) => format!("{fix}, or {alternative}."),
+                None => format!("{fix}."),
+            };
+            return Err(Error::plugin(
+                plugin.name(),
+                format!("needs the `{}` plugin, {why}. {fix}", dependency.plugin),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The plugins chosen for one run, in dependency order.
@@ -156,7 +247,7 @@ impl Selection<'_> {
     }
 }
 
-/// Topological sort that keeps registration order among independent plugins.
+/// Dependency order that otherwise keeps registration order.
 fn dependency_order(plugins: Vec<Box<dyn Plugin>>) -> Result<Vec<Box<dyn Plugin>>> {
     let mut index: HashMap<&'static str, usize> = HashMap::new();
     for (i, plugin) in plugins.iter().enumerate() {
@@ -168,48 +259,40 @@ fn dependency_order(plugins: Vec<Box<dyn Plugin>>) -> Result<Vec<Box<dyn Plugin>
         }
     }
 
-    let mut indegree = vec![0usize; plugins.len()];
-    let mut dependents: Vec<Vec<usize>> = vec![vec![]; plugins.len()];
-    for (i, plugin) in plugins.iter().enumerate() {
+    for plugin in &plugins {
         for dep in plugin.dependencies() {
-            let Some(&dep_idx) = index.get(dep) else {
+            if !index.contains_key(dep) {
                 return Err(Error::plugin(
                     plugin.name(),
                     format!("unknown dependency `{dep}`"),
                 ));
-            };
-            dependents[dep_idx].push(i);
-            indegree[i] += 1;
-        }
-    }
-
-    let mut queue: VecDeque<usize> = indegree
-        .iter()
-        .enumerate()
-        .filter_map(|(i, d)| (*d == 0).then_some(i))
-        .collect();
-    let mut order = Vec::with_capacity(plugins.len());
-    while let Some(i) = queue.pop_front() {
-        order.push(i);
-        for &next in &dependents[i] {
-            indegree[next] -= 1;
-            if indegree[next] == 0 {
-                queue.push_back(next);
             }
         }
     }
-    if order.len() != plugins.len() {
-        // Plugins left with unmet dependencies are the ones on (or behind) a cycle.
-        let stuck: Vec<&'static str> = plugins
-            .iter()
-            .zip(&indegree)
-            .filter(|(_, d)| **d > 0)
-            .map(|(p, _)| p.name())
-            .collect();
-        return Err(Error::plugin(
-            stuck[0],
-            format!("cyclic plugin dependencies: {}", stuck.join(", ")),
-        ));
+
+    // Repeatedly place the earliest-registered plugin whose dependencies are
+    // all placed, so plugins only move later when a dependency forces it.
+    let mut placed = vec![false; plugins.len()];
+    let mut order = Vec::with_capacity(plugins.len());
+    while order.len() < plugins.len() {
+        let next = plugins.iter().enumerate().position(|(i, plugin)| {
+            !placed[i] && plugin.dependencies().iter().all(|dep| placed[index[dep]])
+        });
+        let Some(i) = next else {
+            // What is left waits on itself: plugins on (or behind) a cycle.
+            let stuck: Vec<&'static str> = plugins
+                .iter()
+                .zip(&placed)
+                .filter(|(_, placed)| !**placed)
+                .map(|(p, _)| p.name())
+                .collect();
+            return Err(Error::plugin(
+                stuck[0],
+                format!("cyclic plugin dependencies: {}", stuck.join(", ")),
+            ));
+        };
+        placed[i] = true;
+        order.push(i);
     }
 
     let mut slots: Vec<Option<Box<dyn Plugin>>> = plugins.into_iter().map(Some).collect();

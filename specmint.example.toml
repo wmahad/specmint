@@ -96,7 +96,7 @@ seed = 2
 [plugins.msw]
 enabled = false
 file = "handlers.ts"
-parser = "faker"
+parser = "faker" # "faker" needs [plugins.factories] on; "data" does not
 base_url = "*"
 
 [plugins.zod]

@@ -10,7 +10,7 @@ use tempfile::tempdir;
 use specmint::Result;
 use specmint::config::{Config, GenerateMode};
 use specmint::generate::{ConfigSource, GenerateOptions, generate};
-use specmint::plugin::{OutputFile, Plugin, PluginContext, PluginRegistry};
+use specmint::plugin::{ActiveDependency, OutputFile, Plugin, PluginContext, PluginRegistry};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +18,10 @@ struct FakeOptions {
     #[serde(default)]
     enabled: Option<bool>,
     file: Option<String>,
+    /// When true the plugin no longer needs its dependencies, like msw with
+    /// `parser = "data"`.
+    #[serde(default)]
+    standalone: bool,
 }
 
 /// Records the order plugins ran in.
@@ -72,6 +76,23 @@ impl Plugin for FakePlugin {
 
     fn writes_test_data(&self) -> bool {
         self.test_data
+    }
+
+    fn active_dependencies(&self, config: &Config) -> Result<Vec<ActiveDependency>> {
+        if self.options(config)?.is_some_and(|o| o.standalone) {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .dependencies
+            .iter()
+            .map(|dep| ActiveDependency {
+                plugin: dep,
+                alternative: Some(format!(
+                    "set `standalone = true` in [plugins.{}]",
+                    self.name
+                )),
+            })
+            .collect())
     }
 
     fn output_files(&self, config: &Config) -> Result<Vec<PathBuf>> {
@@ -376,4 +397,196 @@ fn core_writes_the_banner_and_header_above_each_plugins_content() {
             )
         );
     }
+}
+
+fn dependent_and_base(log: &RunLog) -> PluginRegistry {
+    PluginRegistry::new(vec![
+        Box::new(FakePlugin::new("base", log)),
+        Box::new(FakePlugin {
+            dependencies: &["base"],
+            ..FakePlugin::new("dependent", log)
+        }),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn a_plugin_whose_dependency_is_off_stops_the_run_and_names_the_fix() {
+    let log = RunLog::default();
+    let registry = dependent_and_base(&log);
+
+    let cfg = config(r#"{ "dependent": {} }"#);
+    let err = registry.select(&cfg, None, None).err().unwrap().to_string();
+
+    assert_eq!(
+        err,
+        "plugin[dependent]: needs the `base` plugin, which is off. \
+         Switch on `base`, or set `standalone = true` in [plugins.dependent]."
+    );
+}
+
+#[test]
+fn a_dependency_without_an_alternative_only_suggests_switching_it_on() {
+    struct Plain;
+    impl Plugin for Plain {
+        fn name(&self) -> &'static str {
+            "plain"
+        }
+        fn dependencies(&self) -> &'static [&'static str] {
+            &["base"]
+        }
+        fn enabled(&self, _: &Config) -> Result<bool> {
+            Ok(true)
+        }
+        fn output_files(&self, _: &Config) -> Result<Vec<PathBuf>> {
+            Ok(vec![])
+        }
+        fn generate(&self, _: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
+            Ok(vec![])
+        }
+    }
+    let log = RunLog::default();
+    let registry = PluginRegistry::new(vec![
+        Box::new(FakePlugin::new("base", &log)),
+        Box::new(Plain),
+    ])
+    .unwrap();
+
+    let err = registry
+        .select(&config("{}"), None, None)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        err,
+        "plugin[plain]: needs the `base` plugin, which is off. Switch on `base`."
+    );
+}
+
+#[test]
+fn a_dependency_that_options_drop_lets_the_plugin_run_alone() {
+    let log = RunLog::default();
+    let registry = dependent_and_base(&log);
+
+    let cfg = config(r#"{ "dependent": { "standalone": true } }"#);
+
+    assert_eq!(names(&registry, &cfg, None, None), ["dependent"]);
+}
+
+#[test]
+fn specmint_never_switches_on_a_dependency_itself() {
+    let log = RunLog::default();
+    let registry = dependent_and_base(&log);
+
+    // Both on in config, but the filter leaves the dependency out.
+    let cfg = config(r#"{ "base": {}, "dependent": {} }"#);
+    let filter = vec!["dependent".to_string()];
+    let err = registry
+        .select(&cfg, None, Some(&filter))
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        err,
+        "plugin[dependent]: needs the `base` plugin, which is not in --plugins. \
+         Add `base` to --plugins, or set `standalone = true` in [plugins.dependent]."
+    );
+}
+
+#[test]
+fn types_mode_switching_off_a_dependency_stops_the_run() {
+    let log = RunLog::default();
+    let registry = PluginRegistry::new(vec![
+        Box::new(FakePlugin {
+            test_data: true,
+            ..FakePlugin::new("mocks", &log)
+        }),
+        Box::new(FakePlugin {
+            dependencies: &["mocks"],
+            ..FakePlugin::new("dependent", &log)
+        }),
+    ])
+    .unwrap();
+
+    let cfg = config(r#"{ "mocks": {}, "dependent": {} }"#);
+    let err = registry
+        .select(&cfg, Some(GenerateMode::Types), None)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        err,
+        "plugin[dependent]: needs the `mocks` plugin, which --mode types skips. \
+         Run without --mode types, or set `standalone = true` in [plugins.dependent]."
+    );
+}
+
+#[test]
+fn an_active_dependency_must_be_a_declared_dependency() {
+    struct Sneaky;
+    impl Plugin for Sneaky {
+        fn name(&self) -> &'static str {
+            "sneaky"
+        }
+        fn enabled(&self, _: &Config) -> Result<bool> {
+            Ok(true)
+        }
+        fn active_dependencies(&self, _: &Config) -> Result<Vec<ActiveDependency>> {
+            Ok(vec![ActiveDependency {
+                plugin: "base",
+                alternative: None,
+            }])
+        }
+        fn output_files(&self, _: &Config) -> Result<Vec<PathBuf>> {
+            Ok(vec![])
+        }
+        fn generate(&self, _: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
+            Ok(vec![])
+        }
+    }
+    let log = RunLog::default();
+    let registry = PluginRegistry::new(vec![
+        Box::new(FakePlugin::new("base", &log)),
+        Box::new(Sneaky),
+    ])
+    .unwrap();
+
+    // An active dependency outside `dependencies()` would not be ordered before the
+    // plugin, so it is a bug in the plugin, not a config problem.
+    let err = registry
+        .select(&config(r#"{ "base": {} }"#), None, None)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("depends on `base` with this config, but `base` is not in its dependencies()"),
+        "{err}"
+    );
+}
+
+#[test]
+fn plugins_keep_registration_order_unless_a_dependency_forces_a_move() {
+    let log = RunLog::default();
+    let registry = PluginRegistry::new(vec![
+        Box::new(FakePlugin::new("a", &log)),
+        Box::new(FakePlugin {
+            dependencies: &["d"],
+            ..FakePlugin::new("b", &log)
+        }),
+        Box::new(FakePlugin {
+            dependencies: &["a"],
+            ..FakePlugin::new("c", &log)
+        }),
+        Box::new(FakePlugin::new("d", &log)),
+        Box::new(FakePlugin::new("e", &log)),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        registry.names().collect::<Vec<_>>(),
+        ["a", "c", "d", "b", "e"]
+    );
 }
