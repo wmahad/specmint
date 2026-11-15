@@ -200,8 +200,6 @@ inferred = true
     assert!(factories.contains("export function createAccountTypeEnum("));
     assert!(factories.contains("DeepPartial"));
     assert!(factories.contains("configureFaker"));
-    // kubb v5 seeds once at module scope, so successive factory calls return
-    // different data while a run stays reproducible.
     let seed_lines: Vec<&str> = factories
         .lines()
         .filter(|l| l.contains("faker.seed(2)"))
@@ -211,10 +209,10 @@ inferred = true
         vec!["faker.seed(2);"],
         "expected exactly one unindented, module-level faker.seed(2):\n{factories}"
     );
-    let seed_at = factories.find("faker.seed(2);").unwrap();
-    let first_factory_at = factories.find("export function create").unwrap();
+    let seed_offset = factories.find("faker.seed(2);").unwrap();
+    let first_factory_offset = factories.find("export function create").unwrap();
     assert!(
-        seed_at < first_factory_at,
+        seed_offset < first_factory_offset,
         "faker.seed must run before any factory is defined:\n{factories}"
     );
     assert!(factories.contains("arrayOf(() =>"));

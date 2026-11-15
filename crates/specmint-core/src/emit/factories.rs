@@ -90,7 +90,7 @@ fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
         let _ = writeln!(out, "  {name},");
     }
     let _ = writeln!(out, "}} from '{types_file}';");
-    write_seed_line(&mut out, cfg.seed);
+    let _ = writeln!(out, "faker.seed({});", cfg.seed);
     out.push('\n');
     out.push_str(&prelude());
     out.push('\n');
@@ -166,12 +166,6 @@ struct FactoryWriteCtx<'a> {
     schemas: &'a SchemaMap,
     graph: &'a crate::emit::cycles::RefGraph,
     circular: &'a IndexSet<String>,
-}
-
-/// Seeds faker once at module scope, as kubb does: a run is reproducible, and
-/// successive factory calls still return different data.
-fn write_seed_line(out: &mut String, seed: u64) {
-    let _ = writeln!(out, "faker.seed({seed});");
 }
 
 fn write_schema_factory(
