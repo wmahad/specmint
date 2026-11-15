@@ -200,15 +200,20 @@ inferred = true
     assert!(factories.contains("export function createAccountTypeEnum("));
     assert!(factories.contains("DeepPartial"));
     assert!(factories.contains("configureFaker"));
-    // Kubb v5: reseed at the start of every createX (identical first picks across factories).
-    assert!(factories.contains("faker.seed(2);"));
+    let seed_lines: Vec<&str> = factories
+        .lines()
+        .filter(|l| l.contains("faker.seed(2)"))
+        .collect();
+    assert_eq!(
+        seed_lines,
+        vec!["faker.seed(2);"],
+        "expected exactly one unindented, module-level faker.seed(2):\n{factories}"
+    );
+    let seed_offset = factories.find("faker.seed(2);").unwrap();
+    let first_factory_offset = factories.find("export function create").unwrap();
     assert!(
-        factories
-            .lines()
-            .filter(|l| l.trim() == "faker.seed(2);")
-            .count()
-            > 1,
-        "expected per-factory faker.seed(2), not only configureFaker"
+        seed_offset < first_factory_offset,
+        "faker.seed must run before any factory is defined:\n{factories}"
     );
     assert!(factories.contains("arrayOf(() =>"));
     assert!(factories.contains("min: 1, max: 3"));

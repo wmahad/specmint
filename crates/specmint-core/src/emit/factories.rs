@@ -1,6 +1,6 @@
 //! Factories emitter → `factories.ts` (Kubb v5 plugin-faker parity).
 //!
-//! - `faker.seed(seed)` at the start of every `createX` (deterministic mocks)
+//! - `faker.seed(seed)` once at module scope (reproducible runs, distinct values per call)
 //! - `DeepPartial` overrides applied **shallow** — nested objects replace
 //!   (avoids hybrid oneOf/anyOf arms)
 //! - Always concrete values (no `maybeNull`); OAS nullability is for types only
@@ -62,7 +62,6 @@ fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
         schemas,
         graph: &graph,
         circular: &circular,
-        seed: cfg.seed,
     };
 
     let mut type_names: IndexSet<String> = IndexSet::new();
@@ -91,6 +90,7 @@ fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
         let _ = writeln!(out, "  {name},");
     }
     let _ = writeln!(out, "}} from '{types_file}';");
+    let _ = writeln!(out, "faker.seed({});", cfg.seed);
     out.push('\n');
     out.push_str(&prelude());
     out.push('\n');
@@ -137,7 +137,6 @@ fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
                 out,
                 "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
-            write_seed_line(&mut out, write_ctx.seed);
             let _ = writeln!(out, "  return {status_factory}(overrides);");
             let _ = writeln!(out, "}}");
             out.push('\n');
@@ -167,11 +166,6 @@ struct FactoryWriteCtx<'a> {
     schemas: &'a SchemaMap,
     graph: &'a crate::emit::cycles::RefGraph,
     circular: &'a IndexSet<String>,
-    seed: u64,
-}
-
-fn write_seed_line(out: &mut String, seed: u64) {
-    let _ = writeln!(out, "  faker.seed({seed});");
 }
 
 fn write_schema_factory(
@@ -191,7 +185,6 @@ fn write_schema_factory(
                 out,
                 "export function {factory_name}(value?: {type_name}): {type_name} {{"
             );
-            write_seed_line(out, ctx.seed);
             if literals.is_empty() {
                 let _ = writeln!(out, "  return value as {type_name};");
             } else {
@@ -211,7 +204,6 @@ fn write_schema_factory(
                     out,
                     "export function {factory_name}(value?: {type_name}): {type_name} {{"
                 );
-                write_seed_line(out, ctx.seed);
                 let _ = writeln!(out, "  return {target_factory}(value);");
                 let _ = writeln!(out, "}}");
             } else {
@@ -219,7 +211,6 @@ fn write_schema_factory(
                     out,
                     "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
                 );
-                write_seed_line(out, ctx.seed);
                 let _ = writeln!(out, "  return {target_factory}(overrides);");
                 let _ = writeln!(out, "}}");
             }
@@ -229,7 +220,6 @@ fn write_schema_factory(
                 out,
                 "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
-            write_seed_line(out, ctx.seed);
             let faker_ctx = FakerCtx::for_schema(root_schema_name, ctx.graph, ctx.circular);
             let item_expr = match items.as_ref() {
                 SchemaNode::Ref { name } => {
@@ -257,7 +247,6 @@ fn write_schema_factory(
                 out,
                 "export function {factory_name}(\n  overrides?: DeepPartial<{type_name}>,\n): {type_name} {{"
             );
-            write_seed_line(out, ctx.seed);
             let _ = writeln!(out, "  const defaults: {type_name} = {defaults};");
             if paginated {
                 let _ = writeln!(
