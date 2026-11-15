@@ -17,9 +17,9 @@ pub enum Error {
     #[error("adapter: {0}")]
     Adapter(String),
 
-    #[error("emit[{emitter}]: {message}")]
-    Emit {
-        emitter: &'static str,
+    #[error("plugin[{plugin}]: {message}")]
+    Plugin {
+        plugin: &'static str,
         message: String,
     },
 
@@ -54,9 +54,9 @@ impl Error {
         Self::Adapter(msg.into())
     }
 
-    pub fn emit(emitter: &'static str, message: impl Into<String>) -> Self {
-        Self::Emit {
-            emitter,
+    pub fn plugin(plugin: &'static str, message: impl Into<String>) -> Self {
+        Self::Plugin {
+            plugin,
             message: message.into(),
         }
     }

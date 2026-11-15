@@ -1,4 +1,4 @@
-//! Factories emitter → `factories.ts` (Kubb v5 plugin-faker parity).
+//! Factories plugin → `factories.ts` (Kubb v5 plugin-faker parity).
 //!
 //! - `faker.seed(seed)` once at module scope (reproducible runs, distinct values per call)
 //! - `DeepPartial` overrides applied **shallow** — nested objects replace
@@ -11,18 +11,57 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use indexmap::IndexSet;
+use serde::Deserialize;
 
 use crate::adapter::SchemaNode;
-use crate::emit::cycles::{build_ref_graph, find_circular_names};
-use crate::emit::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
-use crate::emit::{EmitCtx, Emitter, OutputFile};
+use crate::config::Config;
 use crate::error::Result;
 use crate::naming::Naming;
+use crate::plugin::{OutputFile, Plugin, PluginContext};
+use crate::plugins::cycles::{build_ref_graph, find_circular_names};
+use crate::plugins::faker_expr::{FakerCtx, SchemaMap, enum_literal_list, faker_expr};
+use crate::plugins::types::TypesOptions;
 
-pub struct FactoriesEmitter;
+pub struct FactoriesPlugin;
 
-impl Emitter for FactoriesEmitter {
-    fn id(&self) -> &'static str {
+/// `[plugins.factories]`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FactoriesOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_file")]
+    pub file: String,
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+}
+
+fn default_file() -> String {
+    "factories.ts".into()
+}
+
+fn default_seed() -> u64 {
+    2
+}
+
+impl Default for FactoriesOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            file: default_file(),
+            seed: default_seed(),
+        }
+    }
+}
+
+impl FactoriesOptions {
+    pub fn from_config(config: &Config) -> Result<Self> {
+        config.plugins.section_or_default(FactoriesPlugin.name())
+    }
+}
+
+impl Plugin for FactoriesPlugin {
+    fn name(&self) -> &'static str {
         "factories"
     }
 
@@ -30,12 +69,23 @@ impl Emitter for FactoriesEmitter {
         &["types"]
     }
 
-    fn enabled(&self, ctx: &EmitCtx<'_>) -> bool {
-        ctx.enabled.factories
+    fn enabled(&self, config: &Config) -> Result<bool> {
+        Ok(FactoriesOptions::from_config(config)?.enabled)
     }
 
-    fn generate(&self, ctx: &EmitCtx<'_>) -> Result<Vec<OutputFile>> {
-        let body = render_factories(ctx)?;
+    fn writes_test_data(&self) -> bool {
+        true
+    }
+
+    fn output_files(&self, config: &Config) -> Result<Vec<PathBuf>> {
+        Ok(vec![PathBuf::from(
+            FactoriesOptions::from_config(config)?.file,
+        )])
+    }
+
+    fn generate(&self, ctx: &PluginContext<'_>) -> Result<Vec<OutputFile>> {
+        let options = FactoriesOptions::from_config(ctx.config)?;
+        let body = render_factories(ctx, &options)?;
         let mut contents = String::new();
         contents.push_str(ctx.config.output.banner.trim_end());
         contents.push('\n');
@@ -43,17 +93,16 @@ impl Emitter for FactoriesEmitter {
         contents.push_str(&body);
 
         Ok(vec![OutputFile {
-            relative_path: PathBuf::from(&ctx.config.emitters.factories.file),
+            relative_path: PathBuf::from(options.file),
             contents,
         }])
     }
 }
 
-fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
+fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<String> {
     let spec = ctx.spec;
     let naming = ctx.naming;
-    let cfg = &ctx.config.emitters.factories;
-    let types_file = types_import_path(&ctx.config.emitters.types.file);
+    let types_file = types_import_path(&TypesOptions::from_config(ctx.config)?.file);
     let schemas: &SchemaMap = &spec.schemas;
     let graph = build_ref_graph(schemas);
     let circular = find_circular_names(&graph);
@@ -164,7 +213,7 @@ fn render_factories(ctx: &EmitCtx<'_>) -> Result<String> {
 struct FactoryWriteCtx<'a> {
     naming: &'a Naming,
     schemas: &'a SchemaMap,
-    graph: &'a crate::emit::cycles::RefGraph,
+    graph: &'a crate::plugins::cycles::RefGraph,
     circular: &'a IndexSet<String>,
 }
 

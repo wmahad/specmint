@@ -40,7 +40,8 @@ pub fn generate(config_json: String) -> napi::Result<GenerateReportJs> {
     run_generate(GenerateOptions {
         config: ConfigSource::Json(config_json),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: false,
         write_schema: None,
     })
@@ -55,7 +56,8 @@ pub fn generate_from_path(config_path: String) -> napi::Result<GenerateReportJs>
     run_generate(GenerateOptions {
         config: ConfigSource::Path(config_path.into()),
         mode: None,
-        emitter_filter: None,
+        plugins: specmint::plugins::builtin(),
+        plugin_filter: None,
         force: false,
         write_schema: None,
     })

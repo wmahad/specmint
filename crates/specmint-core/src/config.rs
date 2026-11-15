@@ -1,9 +1,11 @@
-//! Single TOML config for source, output, naming, and emitters.
+//! Single config for source, output, naming, and the per-plugin sections.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result};
 
@@ -32,7 +34,7 @@ pub struct Config {
     #[serde(default)]
     pub naming: NamingConfig,
     #[serde(default)]
-    pub emitters: EmittersConfig,
+    pub plugins: PluginsConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -163,7 +165,7 @@ impl Default for AdapterConfig {
     fn default() -> Self {
         Self {
             // On by default: catches duplicate ids / broken $refs / path-param gaps
-            // before emitters produce confusing TS.
+            // before plugins produce confusing TS.
             validate: true,
             discriminator: default_discriminator(),
             enum_suffix: default_enum_suffix(),
@@ -173,7 +175,7 @@ impl Default for AdapterConfig {
 
 /// Config-owned naming policy (inversion of control).
 ///
-/// Emitters never hardcode casing — they ask [`crate::naming::Naming`], which
+/// Plugins never hardcode casing — they ask [`crate::naming::Naming`], which
 /// applies these kind rules + regex overrides.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -514,60 +516,43 @@ pub enum EnumStyle {
     AsConst,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct EmittersConfig {
-    #[serde(default = "default_types_emitter")]
-    pub types: TypesEmitterConfig,
-    #[serde(default)]
-    pub factories: FactoriesEmitterConfig,
-    #[serde(default)]
-    pub msw: MswEmitterConfig,
-    #[serde(default)]
-    pub zod: ZodEmitterConfig,
-}
+/// The `plugins` table: one section per plugin, keyed by plugin name.
+///
+/// Core does not know what a section holds. Each plugin reads its own with
+/// [`PluginsConfig::section`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PluginsConfig(BTreeMap<String, serde_json::Value>);
 
-fn default_types_emitter() -> TypesEmitterConfig {
-    TypesEmitterConfig::default()
-}
+impl PluginsConfig {
+    /// Names of the plugins that have a section.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TypesEmitterConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_types_file")]
-    pub file: String,
-    #[serde(default = "default_enum_style")]
-    pub enum_style: EnumStyle,
-    /// How to declare object schemas (`type` stays drop-in with Kubb).
-    /// Unions / intersections / nullable objects always fall back to `type`.
-    #[serde(default)]
-    pub syntax: ObjectSyntax,
-    #[serde(default = "default_true")]
-    pub strip_readonly: bool,
-    #[serde(default = "default_true")]
-    pub compact: bool,
-}
+    /// The `name` section parsed as `T`, or `T::default()` when the config has no
+    /// such section.
+    pub fn section_or_default<T: DeserializeOwned + Default>(&self, name: &str) -> Result<T> {
+        Ok(self.section(name)?.unwrap_or_default())
+    }
 
-fn default_types_file() -> String {
-    "types.ts".into()
-}
-
-fn default_enum_style() -> EnumStyle {
-    EnumStyle::Enum
-}
-
-impl Default for TypesEmitterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            file: default_types_file(),
-            enum_style: EnumStyle::Enum,
-            syntax: ObjectSyntax::Type,
-            strip_readonly: true,
-            compact: true,
-        }
+    /// The `name` section parsed as `T`, or `None` when the config has no such
+    /// section.
+    pub fn section<T: DeserializeOwned>(&self, name: &str) -> Result<Option<T>> {
+        let Some(raw) = self.0.get(name) else {
+            return Ok(None);
+        };
+        serde_path_to_error::deserialize(raw.clone())
+            .map(Some)
+            .map_err(|e| {
+                let path = e.path().to_string();
+                let at = if path == "." {
+                    String::new()
+                } else {
+                    format!(".{path}")
+                };
+                Error::config(format!("plugins.{name}{at}: {}", e.inner()))
+            })
     }
 }
 
@@ -580,102 +565,6 @@ pub enum ObjectSyntax {
     Type,
     /// `export interface Foo { … }` when the schema is a non-nullable object.
     Interface,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FactoriesEmitterConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_factories_file")]
-    pub file: String,
-    #[serde(default = "default_seed")]
-    pub seed: u64,
-}
-
-fn default_factories_file() -> String {
-    "factories.ts".into()
-}
-
-fn default_seed() -> u64 {
-    2
-}
-
-impl Default for FactoriesEmitterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            file: default_factories_file(),
-            seed: default_seed(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MswEmitterConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_msw_file")]
-    pub file: String,
-    /// `"faker"` seeds success bodies from factories; `"data"` requires caller data.
-    #[serde(default = "default_msw_parser")]
-    pub parser: String,
-    #[serde(default = "default_msw_base_url")]
-    pub base_url: String,
-    /// When true, emit `export const handlers = […all handlers…]` (Kubb `handlers: true`).
-    /// Default false — the app imports handlers à la carte.
-    #[serde(default)]
-    pub handlers_barrel: bool,
-}
-
-fn default_msw_file() -> String {
-    "handlers.ts".into()
-}
-
-fn default_msw_parser() -> String {
-    "faker".into()
-}
-
-fn default_msw_base_url() -> String {
-    "*".into()
-}
-
-impl Default for MswEmitterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            file: default_msw_file(),
-            parser: default_msw_parser(),
-            base_url: default_msw_base_url(),
-            handlers_barrel: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ZodEmitterConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_zod_file")]
-    pub file: String,
-    #[serde(default = "default_true")]
-    pub inferred: bool,
-}
-
-fn default_zod_file() -> String {
-    "zod.ts".into()
-}
-
-impl Default for ZodEmitterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            file: default_zod_file(),
-            inferred: true,
-        }
-    }
 }
 
 impl Config {
@@ -713,51 +602,5 @@ impl Config {
             })?;
         }
         Ok(())
-    }
-
-    /// Effective emitters after `--mode types` / `--emitters` filters.
-    pub fn effective_emitters(
-        &self,
-        mode: Option<GenerateMode>,
-        filter: Option<&[String]>,
-    ) -> EffectiveEmitters {
-        let mut types = self.emitters.types.enabled;
-        let mut factories = self.emitters.factories.enabled;
-        let mut msw = self.emitters.msw.enabled;
-        let mut zod = self.emitters.zod.enabled;
-
-        if matches!(mode, Some(GenerateMode::Types)) {
-            factories = false;
-            msw = false;
-        }
-
-        if let Some(ids) = filter {
-            let set: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
-            types = set.contains("types");
-            factories = set.contains("factories");
-            msw = set.contains("msw");
-            zod = set.contains("zod");
-        }
-
-        EffectiveEmitters {
-            types,
-            factories,
-            msw,
-            zod,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct EffectiveEmitters {
-    pub types: bool,
-    pub factories: bool,
-    pub msw: bool,
-    pub zod: bool,
-}
-
-impl EffectiveEmitters {
-    pub fn any_enabled(self) -> bool {
-        self.types || self.factories || self.msw || self.zod
     }
 }

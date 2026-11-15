@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::emit::OutputFile;
 use crate::error::{Error, Result};
+use crate::plugin::OutputFile;
 
 const PRESERVE_NAMES: &[&str] = &[".gitkeep"];
 

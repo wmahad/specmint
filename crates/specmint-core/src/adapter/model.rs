@@ -1,7 +1,7 @@
 //! In-memory model of an OpenAPI document after parsing.
 //!
-//! Emitters read this instead of the raw OpenAPI JSON/YAML so naming, cycles,
-//! and nullability rules stay consistent across types / factories / MSW / Zod.
+//! Plugins read this instead of the raw OpenAPI JSON/YAML so naming, cycles,
+//! and nullability rules stay consistent across plugins.
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};

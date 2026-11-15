@@ -13,10 +13,10 @@
 use indexmap::{IndexMap, IndexSet};
 
 use crate::adapter::{EnumValue, PrimitiveKind, SchemaNode};
-use crate::emit::cycles::{
+use crate::naming::Naming;
+use crate::plugins::cycles::{
     CycleKind, RefGraph, property_cycle_kind, resolve_ref_name, schema_is_array,
 };
-use crate::naming::Naming;
 
 /// Context for nested factory expression generation.
 #[derive(Debug, Clone, Copy)]

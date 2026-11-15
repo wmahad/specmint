@@ -7,9 +7,9 @@ use tracing::info;
 
 use crate::adapter::{ParseOptions, parse_openapi_with_options};
 use crate::config::{Config, GenerateMode};
-use crate::emit::{EmitCtx, EmitterRegistry};
 use crate::error::{Error, Result};
 use crate::naming::Naming;
+use crate::plugin::{Plugin, PluginContext, PluginRegistry};
 use crate::source::{GenerateFingerprint, SourceLoader};
 use crate::write::{outputs_exist, write_outputs};
 
@@ -22,8 +22,12 @@ pub enum ConfigSource {
 
 pub struct GenerateOptions {
     pub config: ConfigSource,
+    /// Every available plugin; the config and `plugin_filter` pick which run.
+    /// Callers pass [`crate::plugins::builtin`].
+    pub plugins: Vec<Box<dyn Plugin>>,
     pub mode: Option<GenerateMode>,
-    pub emitter_filter: Option<Vec<String>>,
+    /// Plugin names to run instead of the config's on/off switches (`--plugins`).
+    pub plugin_filter: Option<Vec<String>>,
     pub force: bool,
     pub write_schema: Option<PathBuf>,
 }
@@ -55,10 +59,11 @@ pub fn generate(opts: GenerateOptions) -> Result<GenerateReport> {
         ConfigSource::Path(path) => Config::load(path)?,
         ConfigSource::Json(json) => Config::from_json_str(json)?,
     };
-    let enabled = config.effective_emitters(opts.mode, opts.emitter_filter.as_deref());
-    if !enabled.any_enabled() {
+    let registry = PluginRegistry::new(opts.plugins)?;
+    let selection = registry.select(&config, opts.mode, opts.plugin_filter.as_deref())?;
+    if selection.is_empty() {
         return Err(Error::config(
-            "no emitters enabled (check config / --mode / --emitters)",
+            "no plugins enabled (check config / --mode / --plugins)",
         ));
     }
 
@@ -100,7 +105,7 @@ pub fn generate(opts: GenerateOptions) -> Result<GenerateReport> {
     );
 
     let fingerprint = GenerateFingerprint::in_cache_dir(&config.source.cache.dir);
-    let expected_files = expected_output_files(&config, enabled);
+    let expected_files = selection.output_files(&config)?;
     if !opts.force
         && fingerprint.read_spec_hash()?.as_deref() == Some(spec_hash.as_str())
         && outputs_exist(&config.output.path, &expected_files)
@@ -121,20 +126,18 @@ pub fn generate(opts: GenerateOptions) -> Result<GenerateReport> {
     }
 
     let naming = Naming::new(config.naming.clone())?;
-    let registry = EmitterRegistry::builtin();
-    let ctx = EmitCtx {
+    let ctx = PluginContext {
         config: &config,
         naming: &naming,
         spec: &spec,
-        enabled,
     };
 
     let t2 = Instant::now();
-    let files = registry.run(&ctx)?;
+    let files = selection.run(&ctx)?;
     timings.emit = t2.elapsed();
 
     let t3 = Instant::now();
-    // Types-only mode should not wipe factories/handlers that Kubb still owns.
+    // Types-only mode should not wipe test-data files another tool still owns.
     let clean = config.output.clean && opts.mode != Some(GenerateMode::Types);
     let written = write_outputs(&config.output.path, clean, &files)?;
     timings.write = t3.elapsed();
@@ -150,24 +153,4 @@ pub fn generate(opts: GenerateOptions) -> Result<GenerateReport> {
         source_is_url,
         schema_bytes: schema.bytes.len(),
     })
-}
-
-fn expected_output_files(
-    config: &Config,
-    enabled: crate::config::EffectiveEmitters,
-) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if enabled.types {
-        files.push(PathBuf::from(&config.emitters.types.file));
-    }
-    if enabled.factories {
-        files.push(PathBuf::from(&config.emitters.factories.file));
-    }
-    if enabled.msw {
-        files.push(PathBuf::from(&config.emitters.msw.file));
-    }
-    if enabled.zod {
-        files.push(PathBuf::from(&config.emitters.zod.file));
-    }
-    files
 }

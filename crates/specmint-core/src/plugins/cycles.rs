@@ -11,7 +11,7 @@ use petgraph::algo::{has_path_connecting, tarjan_scc};
 use petgraph::graphmap::DiGraphMap;
 
 use crate::adapter::SchemaNode;
-use crate::emit::faker_expr::SchemaMap;
+use crate::plugins::faker_expr::SchemaMap;
 
 pub type RefGraph = IndexMap<String, IndexSet<String>>;
 

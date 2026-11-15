@@ -40,7 +40,7 @@ discriminator = "propagate"
 enum_suffix = " "
 
 [naming]
-# Kind policies — emitters ask Naming; they do not hardcode casing.
+# Kind policies — plugins ask Naming; they do not hardcode casing.
 # Legacy flat keys (schema_case, factory_prefix, …) still work.
 
 [naming.schema]
@@ -78,7 +78,7 @@ enum_style = "literal"
 # enum_member = { strategy = "case", case = "PascalCase", digit_prefix = false }
 # syntax = "interface"   # this schema only
 
-[emitters.types]
+[plugins.types]
 enabled = true
 file = "types.ts"
 enum_style = "enum"
@@ -88,18 +88,18 @@ syntax = "type"
 strip_readonly = true
 compact = true
 
-[emitters.factories]
+[plugins.factories]
 enabled = false
 file = "factories.ts"
 seed = 2
 
-[emitters.msw]
+[plugins.msw]
 enabled = false
 file = "handlers.ts"
 parser = "faker"
 base_url = "*"
 
-[emitters.zod]
+[plugins.zod]
 enabled = false
 file = "zod.ts"
 inferred = true

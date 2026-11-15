@@ -37,7 +37,7 @@ import { defineConfig } from "specmint/config";
 export default defineConfig({
   source: { input: "https://example.com/openapi.json" }, // or a local file path
   output: { path: "./.generated", clean: true },
-  emitters: {
+  plugins: {
     types: { enabled: true },
     factories: { enabled: true },
     msw: { enabled: true },
@@ -49,8 +49,9 @@ Full field reference: [`specmint.example.toml`](specmint.example.toml) /
 [`specmint.config.example.mts`](specmint.config.example.mts).
 
 URL inputs use ETag caching under `.cache/openapi/`. Auth via
-`SPECMINT_BASIC_AUTH='user:password'`. Emit is skipped when the parsed-spec hash
-is unchanged (`--force` overrides on the Cargo CLI).
+`SPECMINT_BASIC_AUTH='user:password'`. Generation is skipped when the parsed spec
+is unchanged and every plugin's files are still there (`--force` overrides on the
+Cargo CLI).
 
 ## CLI
 
@@ -69,8 +70,12 @@ Or add a script in the consuming app (`"generate-api": "specmint"`) and run
 export SPECMINT_BASIC_AUTH='user:password'
 cargo run -p specmint-cli -- generate --config specmint.toml --force --timings
 cargo run -p specmint-cli -- generate --config specmint.toml --mode types
-cargo run -p specmint-cli -- generate --config specmint.toml --emitters types,factories,msw
+cargo run -p specmint-cli -- generate --config specmint.toml --plugins types,factories,msw
 ```
+
+`--mode types` skips the plugins that write test data (factories and msw), even
+when they are on in the config. `--plugins` runs exactly the named plugins and
+ignores the config's `enabled` switches; an unknown name is an error.
 
 ## Repository layout
 
@@ -78,7 +83,7 @@ A pnpm workspace with Turborepo on top, and a Cargo workspace for the Rust code.
 
 ```
 crates/
-├── specmint-core/   # pipeline: config → source → adapter → naming → emit → write
+├── specmint-core/   # pipeline: config → source → adapter → naming → plugins → write
 ├── specmint-cli/    # Rust CLI, for development and benchmarks
 └── specmint-napi/   # Node addon (cdylib)
 packages/
@@ -88,7 +93,7 @@ examples/            # example projects (coming in #7)
 benchmarks/          # specmint vs kubb (coming in #9)
 ```
 
-Each Rust crate has a small private `package.json` whose scripts call cargo, so Turborepo can run and cache them. Plugins (types → factories → msw → zod) are compiled into the addon and switched on in config.
+Each Rust crate has a small private `package.json` whose scripts call cargo, so Turborepo can run and cache them. Plugins live in `specmint-core/src/plugins/`, each with its own `[plugins.<name>]` config section; they are compiled into the addon and switched on in config. A plugin runs after the plugins it depends on: factories and zod need types, and msw needs types and factories.
 
 ## Develop
 
