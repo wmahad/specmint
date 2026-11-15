@@ -1,0 +1,14 @@
+# Rust
+target/
+
+# napi build output
+*.node
+index.js
+index.d.ts
+
+# Node
+node_modules/
+
+# Spec fetch cache and generated output
+.cache/
+.generated/

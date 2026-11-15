@@ -1,0 +1,216 @@
+openapi: 3.0.3
+info:
+  title: Parity Fixture API
+  version: 0.0.1
+paths:
+  /nodes/{nodeId}:
+    parameters:
+      - $ref: "#/components/parameters/NodeId"
+      - $ref: "#/components/parameters/ClientToken"
+    get:
+      operationId: getNode
+      responses:
+        "200":
+          $ref: "#/components/responses/NodeOk"
+  /entities:
+    post:
+      operationId: createEntity
+      requestBody:
+        $ref: "#/components/requestBodies/CreateEntity"
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+  /secrets:
+    get:
+      operationId: getSecretInline
+      responses:
+        "200":
+          description: inlined writeOnly strip
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - public_id
+                properties:
+                  public_id:
+                    type: string
+                  password:
+                    type: string
+                    writeOnly: true
+components:
+  parameters:
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+    ClientToken:
+      name: X-Client-Token
+      in: header
+      required: false
+      schema:
+        type: string
+  requestBodies:
+    CreateEntity:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Entity"
+  responses:
+    NodeOk:
+      description: ok
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Node"
+  schemas:
+    # Free-form blob → TypeScript `any`
+    TableConfig: {}
+    # Mutual cycle A ↔ B (factories must break with lazy getters / undefined)
+    Node:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        child:
+          $ref: "#/components/schemas/NodeChild"
+          nullable: true
+    NodeChild:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/Node"
+    # readOnly id should remain on Entity but strip from CreateEntityMutationRequest
+    # Named string enum — request strip_readonly must keep LanguageEnum[], not
+    # inline `'en' | 'nl'[]` (missing parens + breaks assignability).
+    LanguageEnum:
+      type: string
+      enum:
+        - en
+        - nl
+        - de
+    Entity:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        languages:
+          type: array
+          items:
+            $ref: "#/components/schemas/LanguageEnum"
+        table_config:
+          $ref: "#/components/schemas/TableConfig"
+          nullable: true
+        # Item-level nullable is a common DRF quirk; Kubb emitted string[], not
+        # (string | null)[]. Array-level nullable (not set here) → T[] | null.
+        type_ids:
+          type: array
+          items:
+            type: string
+            nullable: true
+        # OAS 3.1 nullability (also common in 3.0 FastAPI/Pydantic dumps)
+        enforced:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        status:
+          anyOf:
+            - type: string
+            - type: "null"
+    # OAS 3.1-style const discriminator arm
+    EvidenceRequirement:
+      type: object
+      required:
+        - code
+      properties:
+        type:
+          const: evidence
+          type: string
+        code:
+          type: string
+    DataRequirement:
+      type: object
+      required:
+        - code
+      properties:
+        type:
+          const: data
+          type: string
+        code:
+          type: string
+    # Discriminated oneOf (Kubb preserve) + array-of-union parens
+    Paragraph:
+      type: object
+      properties:
+        requirements:
+          type: array
+          items:
+            discriminator:
+              propertyName: type
+              mapping:
+                evidence: "#/components/schemas/EvidenceRequirement"
+                data: "#/components/schemas/DataRequirement"
+            oneOf:
+              - $ref: "#/components/schemas/EvidenceRequirement"
+              - $ref: "#/components/schemas/DataRequirement"
+    # NullEnum alone → null (not never)
+    NullEnum:
+      enum:
+        - null
+    # Enum with null member → strip null + nullable at use sites
+    MaybeStatus:
+      type: string
+      enum:
+        - open
+        - closed
+        - null
+    # OAS 3.1 multi-type nullability
+    MultiTypeFlag:
+      type:
+        - boolean
+        - "null"
+    # Single-member allOf flattens
+    WrappedName:
+      allOf:
+        - type: string
+    # Adjacent object allOf merge
+    MergedProfile:
+      allOf:
+        - type: object
+          properties:
+            first:
+              type: string
+          required:
+            - first
+        - type: object
+          properties:
+            last:
+              type: string
+    # writeOnly kept on named schemas (Create/Input); stripped only when inlined
+    # into response emission (see /secrets GET below).
+    SecretBundle:
+      type: object
+      required:
+        - public_id
+      properties:
+        public_id:
+          type: string
+        password:
+          type: string
+          writeOnly: true

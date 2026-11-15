@@ -1,0 +1,105 @@
+openapi: 3.0.3
+info:
+  title: Tiny Fixture API
+  version: 0.0.1
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+        "400":
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+components:
+  schemas:
+    AccountTypeEnum:
+      type: string
+      enum:
+        - free
+        - paid
+    AdditivesEnum:
+      type: string
+      enum:
+        - no_additives
+        - oxygen_scavenger
+        - OTHER_VALUE
+    CardTypeDocumentDiscriminator:
+      type: string
+      enum:
+        - document
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+    Pet:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: "@type string"
+        name:
+          type: string
+        tag:
+          type: string
+          nullable: true
+        account_type:
+          $ref: "#/components/schemas/AccountTypeEnum"
+        additives:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditivesEnum"

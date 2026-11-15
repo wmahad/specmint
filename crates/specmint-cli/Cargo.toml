@@ -1,0 +1,18 @@
+[package]
+name = "specmint-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "OpenAPI → TypeScript generator CLI (Kubb-compatible)"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "specmint"
+path = "src/main.rs"
+
+[dependencies]
+specmint = { path = "../specmint-core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

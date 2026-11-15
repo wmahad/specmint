@@ -1,0 +1,19 @@
+[package]
+name = "specmint-napi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "napi-rs bindings exposing specmint's generate pipeline to Node.js"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+specmint = { path = "../specmint-core" }
+napi = "3"
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"
