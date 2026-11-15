@@ -2,7 +2,7 @@
 name = "specmint-napi"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "napi-rs bindings exposing specmint's generate pipeline to Node.js"
 license = "MIT"
 publish = false
