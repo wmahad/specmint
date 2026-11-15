@@ -1397,3 +1397,39 @@ components:
         "{factories}"
     );
 }
+
+#[test]
+fn factories_pass_their_own_type_to_apply_overrides_so_narrowed_defaults_still_accept_overrides() {
+    let dir = generate_inline(
+        r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Flag:
+      type: [boolean, "null"]
+    Settings:
+      type: object
+      properties:
+        enabled: { type: boolean, nullable: true }
+"#,
+        "[plugins.factories]\nenabled = true\n",
+    );
+    let factories = std::fs::read_to_string(dir.path().join("generated/factories.ts")).unwrap();
+
+    // `defaults` narrows to `boolean`; without `<Flag>` TypeScript would infer
+    // `T = boolean` and reject `DeepPartial<boolean | null>` overrides.
+    assert!(
+        factories.contains(
+            "  return overrides === undefined ? defaults : applyOverrides<Flag>(defaults, overrides);"
+        ),
+        "{factories}"
+    );
+    assert!(
+        factories.contains(
+            "  return overrides === undefined ? defaults : applyOverrides<Settings>(defaults, overrides);"
+        ),
+        "{factories}"
+    );
+}

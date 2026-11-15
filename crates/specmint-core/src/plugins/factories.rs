@@ -335,12 +335,14 @@ fn write_schema_factory(
             if paginated {
                 let _ = writeln!(
                     out,
-                    "  return overrides === undefined ? withSyncedPagination(defaults) : withSyncedPagination(applyOverrides(defaults, overrides), overrides);"
+                    "  return overrides === undefined ? withSyncedPagination(defaults) : withSyncedPagination(applyOverrides<{type_name}>(defaults, overrides), overrides);"
                 );
             } else {
+                // `defaults` narrows to the type of its initializer, so pass the
+                // declared type or a nullable `T` would reject null overrides.
                 let _ = writeln!(
                     out,
-                    "  return overrides === undefined ? defaults : applyOverrides(defaults, overrides);"
+                    "  return overrides === undefined ? defaults : applyOverrides<{type_name}>(defaults, overrides);"
                 );
             }
             let _ = writeln!(out, "}}");
