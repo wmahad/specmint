@@ -71,28 +71,29 @@ cargo run -p specmint-cli -- generate --config specmint.toml --mode types
 cargo run -p specmint-cli -- generate --config specmint.toml --emitters types,factories,msw
 ```
 
-## Architecture
+## Repository layout
+
+A pnpm workspace with Turborepo on top, and a Cargo workspace for the Rust code.
 
 ```
 crates/
 ├── specmint-core/   # pipeline: config → source → adapter → naming → emit → write
-├── specmint-cli/    # `specmint` binary
+├── specmint-cli/    # Rust CLI, for development and benchmarks
 └── specmint-napi/   # Node addon (cdylib)
+packages/
+└── specmint/        # the npm package users install (bin, config helper, addon loader)
+apps/docs/           # docs site (coming in #4)
+examples/            # example projects (coming in #7)
+benchmarks/          # specmint vs kubb (coming in #9)
 ```
 
-Emitters (types → factories → msw → zod) are compiled in and toggled via config.
+Each Rust crate has a small private `package.json` whose scripts call cargo, so Turborepo can run and cache them. Plugins (types → factories → msw → zod) are compiled into the addon and switched on in config.
 
 ## Develop
 
-```bash
-pnpm build          # napi addon for this platform (+ index.js / index.d.ts)
-pnpm run lint       # oxlint on bin / src-js / scripts
-pnpm run format     # rustfmt
-pnpm run typecheck  # cargo clippy -D warnings
-pnpm run test       # cargo test --workspace
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the main commands (`pnpm install`, `pnpm build`, `pnpm test`, `pnpm lint`).
 
-Generated (do not commit): `*.node`, `index.js`, `index.d.ts`, `target/`.
+Generated and not committed: `target/`, and the addon files (`*.node`, `index.js`, `index.d.ts`) in `packages/specmint`.
 
 ## Packaging
 

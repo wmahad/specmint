@@ -1,60 +1,19 @@
 {
-  "name": "specmint",
-  "version": "1.0.3",
-  "description": "OpenAPI → TypeScript artifacts generator (types, faker factories, MSW handlers)",
-  "keywords": [
-    "codegen",
-    "faker",
-    "msw",
-    "openapi",
-    "typescript"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/wmahad/specmint.git"
-  },
-  "bin": {
-    "specmint": "bin/specmint.mjs"
-  },
-  "files": [
-    "bin",
-    "src-js",
-    "scripts",
-    "index.js",
-    "index.d.ts",
-    "README.md",
-    "LICENSE"
-  ],
-  "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
-    },
-    "./config": {
-      "types": "./src-js/define-config.d.ts",
-      "default": "./src-js/define-config.mjs"
-    }
-  },
-  "scripts": {
-    "build": "napi build --manifest-path crates/specmint-napi/Cargo.toml --platform --release --output-dir .",
-    "build:debug": "napi build --manifest-path crates/specmint-napi/Cargo.toml --platform --output-dir .",
-    "lint": "oxlint bin src-js scripts",
-    "format": "cargo fmt --all",
-    "format:check": "cargo fmt --all -- --check",
-    "typecheck": "cargo clippy --workspace --all-targets -- -D warnings",
-    "test": "cargo test --workspace",
-    "clean": "rm -rf target *.node index.js index.d.ts node_modules .turbo",
-    "postinstall": "node scripts/postinstall.mjs"
-  },
-  "devDependencies": {
-    "@napi-rs/cli": "^3.10.8",
-    "oxlint": "^1.93.0"
-  },
-  "napi": {
-    "binaryName": "specmint"
-  },
+  "name": "specmint-monorepo",
+  "private": true,
+  "packageManager": "pnpm@12.9.1",
   "engines": {
     "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "cargo fmt --all",
+    "format:check": "cargo fmt --all -- --check",
+    "clean": "pnpm -r run clean && cargo clean"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.11"
   }
 }

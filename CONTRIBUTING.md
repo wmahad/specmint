@@ -12,15 +12,17 @@ Thanks for helping. Bug reports, fixes and new kubb features are all welcome.
 
 ## Setup
 
-You need Rust (stable, via [rustup](https://rustup.rs)) and Node 22.18 or newer.
+You need Rust (stable, via [rustup](https://rustup.rs)) and Node 22.18 or newer with [pnpm](https://pnpm.io).
 
 ```bash
-cargo test --workspace                                # run the tests
-cargo clippy --workspace --all-targets -- -D warnings # lint the Rust code
-cargo fmt --all                                       # format the Rust code
+pnpm install   # install workspace dependencies
+pnpm test      # run every crate's tests
+pnpm lint      # clippy for the Rust code, oxlint for the npm package
+pnpm format    # format the Rust code
+pnpm build     # build the Node addon for your platform
 ```
 
-To build the Node addon for your platform, install the npm dependencies and run `npm run build`.
+These run through Turborepo, which caches results, so a repeat run only redoes what changed.
 
 ## Pull requests
 

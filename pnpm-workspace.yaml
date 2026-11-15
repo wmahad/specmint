@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+  - crates/*
+  - apps/*
+  - examples/*
+  - benchmarks/*

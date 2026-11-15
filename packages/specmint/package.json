@@ -1,0 +1,58 @@
+{
+  "name": "specmint",
+  "version": "1.0.3",
+  "description": "OpenAPI → TypeScript artifacts generator (types, faker factories, MSW handlers)",
+  "keywords": [
+    "codegen",
+    "faker",
+    "msw",
+    "openapi",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wmahad/specmint.git"
+  },
+  "bin": {
+    "specmint": "bin/specmint.mjs"
+  },
+  "files": [
+    "bin",
+    "src-js",
+    "scripts",
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./config": {
+      "types": "./src-js/define-config.d.ts",
+      "default": "./src-js/define-config.mjs"
+    }
+  },
+  "scripts": {
+    "build": "napi build --manifest-path ../../crates/specmint-napi/Cargo.toml --platform --release --output-dir .",
+    "build:debug": "napi build --manifest-path ../../crates/specmint-napi/Cargo.toml --platform --output-dir .",
+    "lint": "oxlint bin src-js scripts",
+    "prepack": "node -e \"for (const f of ['README.md', 'LICENSE']) require('node:fs').copyFileSync('../../' + f, f)\"",
+    "clean": "rm -rf *.node index.js index.d.ts node_modules .turbo",
+    "postinstall": "node scripts/postinstall.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.10.8",
+    "crate-specmint-napi": "workspace:*",
+    "oxlint": "^1.93.0"
+  },
+  "napi": {
+    "binaryName": "specmint"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
