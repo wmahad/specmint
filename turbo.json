@@ -6,6 +6,20 @@
     "rust-toolchain.toml",
     ".cargo/**"
   ],
+  "globalEnv": [
+    "RUSTFLAGS",
+    "RUSTDOCFLAGS",
+    "RUSTUP_TOOLCHAIN",
+    "CARGO_PROFILE_*",
+    "CARGO_BUILD_*"
+  ],
+  "globalPassThroughEnv": [
+    "CARGO_HOME",
+    "CARGO_TARGET_DIR",
+    "RUSTUP_HOME",
+    "RUSTC_WRAPPER",
+    "SCCACHE_*"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
