@@ -108,7 +108,7 @@ export default defineConfig({
     msw: {
       enabled: false,
       file: "handlers.ts",
-      parser: "faker",
+      parser: "faker", // "faker" needs factories on; "data" does not
       base_url: "*",
     },
     zod: {

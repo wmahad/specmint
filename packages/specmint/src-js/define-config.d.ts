@@ -119,7 +119,10 @@ export interface SpecmintFactoriesPlugin {
 export interface SpecmintMswPlugin {
   enabled?: boolean;
   file?: string;
-  /** `"faker"` seeds success bodies from factories; `"data"` requires caller data. */
+  /**
+   * `"faker"` seeds success bodies from factories and needs the factories
+   * plugin on; `"data"` requires caller data and works without it.
+   */
   parser?: string;
   base_url?: string;
   handlers_barrel?: boolean;

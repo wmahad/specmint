@@ -750,7 +750,7 @@ fn each_builtin_plugin_writes_its_own_file_in_dependency_order() {
     let (_dir, report) = generate_tiny(ALL_BUILTIN_PLUGINS_ON, None, None);
     assert_eq!(
         written_names(&report.unwrap()),
-        ["types.ts", "factories.ts", "zod.ts", "handlers.ts"]
+        ["types.ts", "factories.ts", "handlers.ts", "zod.ts"]
     );
 }
 
@@ -859,4 +859,74 @@ banner = "// custom banner"
             "{file} has one header"
         );
     }
+}
+
+#[test]
+fn msw_with_the_faker_parser_and_factories_off_stops_and_names_both_fixes() {
+    let (_dir, report) = generate_tiny("[plugins.msw]\nenabled = true\n", None, None);
+    assert_eq!(
+        report.err().unwrap().to_string(),
+        "plugin[msw]: needs the `factories` plugin, which is off. \
+         Switch on `factories`, or set `parser = \"data\"` in [plugins.msw]."
+    );
+}
+
+#[test]
+fn msw_with_the_data_parser_runs_without_factories() {
+    let (dir, report) = generate_tiny(
+        "[plugins.msw]\nenabled = true\nparser = \"data\"\n",
+        None,
+        None,
+    );
+    assert_eq!(written_names(&report.unwrap()), ["types.ts", "handlers.ts"]);
+
+    let handlers = std::fs::read_to_string(dir.path().join("generated/handlers.ts")).unwrap();
+    assert!(!handlers.contains("./factories"), "{handlers}");
+    assert!(handlers.contains("from './types'"), "{handlers}");
+}
+
+#[test]
+fn factories_with_types_off_stops_with_a_clear_error() {
+    let plugins = "[plugins.types]\nenabled = false\n\n[plugins.factories]\nenabled = true\n";
+    let (_dir, report) = generate_tiny(plugins, None, None);
+    assert_eq!(
+        report.err().unwrap().to_string(),
+        "plugin[factories]: needs the `types` plugin, which is off. Switch on `types`."
+    );
+}
+
+#[test]
+fn msw_with_types_off_stops_even_with_the_data_parser() {
+    let plugins =
+        "[plugins.types]\nenabled = false\n\n[plugins.msw]\nenabled = true\nparser = \"data\"\n";
+    let (_dir, report) = generate_tiny(plugins, None, None);
+    assert_eq!(
+        report.err().unwrap().to_string(),
+        "plugin[msw]: needs the `types` plugin, which is off. Switch on `types`."
+    );
+}
+
+#[test]
+fn zod_imports_nothing_from_types_so_it_runs_with_types_off() {
+    let plugins = "[plugins.types]\nenabled = false\n\n[plugins.zod]\nenabled = true\n";
+    let (dir, report) = generate_tiny(plugins, None, None);
+    assert_eq!(written_names(&report.unwrap()), ["zod.ts"]);
+
+    let zod = std::fs::read_to_string(dir.path().join("generated/zod.ts")).unwrap();
+    assert!(!zod.contains("./types"), "{zod}");
+}
+
+#[test]
+fn the_plugin_filter_cannot_leave_out_a_dependency() {
+    let (_dir, report) = generate_tiny(
+        ALL_BUILTIN_PLUGINS_ON,
+        None,
+        Some(vec!["types".to_string(), "msw".to_string()]),
+    );
+    let err = report.err().unwrap().to_string();
+    assert_eq!(
+        err,
+        "plugin[msw]: needs the `factories` plugin, which is not in --plugins. \
+         Add `factories` to --plugins, or set `parser = \"data\"` in [plugins.msw]."
+    );
 }

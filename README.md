@@ -77,6 +77,10 @@ cargo run -p specmint-cli -- generate --config specmint.toml --plugins types,fac
 when they are on in the config. `--plugins` runs exactly the named plugins and
 ignores the config's `enabled` switches; an unknown name is an error.
 
+specmint never switches a plugin on by itself. If a plugin needs one that is off
+(factories and msw need types; msw with `parser = "faker"` also needs factories),
+the run stops and says how to fix the config.
+
 ## Repository layout
 
 A pnpm workspace with Turborepo on top, and a Cargo workspace for the Rust code.

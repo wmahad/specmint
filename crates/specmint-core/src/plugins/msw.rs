@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::adapter::SchemaNode;
 use crate::config::Config;
 use crate::error::Result;
-use crate::plugin::{OutputFile, Plugin, PluginContext};
+use crate::plugin::{ActiveDependency, OutputFile, Plugin, PluginContext};
 use crate::plugins::factories::FactoriesOptions;
 use crate::plugins::types::TypesOptions;
 
@@ -81,6 +81,21 @@ impl Plugin for MswPlugin {
 
     fn enabled(&self, config: &Config) -> Result<bool> {
         Ok(MswOptions::from_config(config)?.enabled)
+    }
+
+    fn active_dependencies(&self, config: &Config) -> Result<Vec<ActiveDependency>> {
+        let mut dependencies = vec![ActiveDependency {
+            plugin: "types",
+            alternative: None,
+        }];
+        // Only the faker parser imports factories.
+        if MswOptions::from_config(config)?.parser == "faker" {
+            dependencies.push(ActiveDependency {
+                plugin: "factories",
+                alternative: Some("set `parser = \"data\"` in [plugins.msw]".to_string()),
+            });
+        }
+        Ok(dependencies)
     }
 
     fn writes_test_data(&self) -> bool {

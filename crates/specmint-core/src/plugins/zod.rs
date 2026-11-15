@@ -54,10 +54,6 @@ impl Plugin for ZodPlugin {
         "zod"
     }
 
-    fn dependencies(&self) -> &'static [&'static str] {
-        &["types"]
-    }
-
     fn enabled(&self, config: &Config) -> Result<bool> {
         Ok(ZodOptions::from_config(config)?.enabled)
     }
