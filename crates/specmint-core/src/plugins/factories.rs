@@ -45,7 +45,6 @@ pub struct FactoriesOptions {
     pub overrides: Vec<AffixOverride>,
 }
 
-/// The factory name for each type, after overrides.
 #[derive(Debug)]
 pub struct FactoryNames(AffixNames);
 
@@ -91,7 +90,6 @@ impl FactoriesOptions {
         config.plugins.section_or_default(FactoriesPlugin.name())
     }
 
-    /// How other generated files import the factories file.
     pub fn import_path(&self) -> String {
         super::relative_import(&self.file)
     }

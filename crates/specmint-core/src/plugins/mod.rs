@@ -25,7 +25,6 @@ fn relative_import(file: &str) -> String {
     format!("./{}", file.trim_end_matches(".ts"))
 }
 
-/// Every built-in plugin.
 pub fn builtin() -> Vec<Box<dyn Plugin>> {
     vec![
         Box::new(TypesPlugin),

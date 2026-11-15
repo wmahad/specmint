@@ -20,7 +20,6 @@ pub struct OutputFile {
     pub contents: String,
 }
 
-/// What a plugin reads while generating.
 pub struct PluginContext<'a> {
     pub config: &'a Config,
     pub naming: &'a Naming,
@@ -31,7 +30,6 @@ pub struct PluginContext<'a> {
 /// must be on for this plugin's output to work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveDependency {
-    /// Name of the plugin depended on.
     pub plugin: &'static str,
     /// Another way to fix the config, besides switching the plugin on, written
     /// to finish the sentence "Switch on `x`, or …". Name options by their path
@@ -65,7 +63,6 @@ pub trait Plugin: Send + Sync {
             .collect())
     }
 
-    /// Whether the config switches this plugin on.
     fn enabled(&self, config: &Config) -> Result<bool>;
 
     /// Whether the plugin writes test data (factories, mock handlers).

@@ -442,7 +442,6 @@ impl OverrideKind {
 pub struct PluginsConfig(BTreeMap<String, serde_json::Value>);
 
 impl PluginsConfig {
-    /// Names of the plugins that have a section.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.0.keys().map(String::as_str)
     }

@@ -48,7 +48,6 @@ pub struct MswOptions {
     pub overrides: Vec<AffixOverride>,
 }
 
-/// The handler name for each operation, after overrides.
 #[derive(Debug)]
 pub struct HandlerNames(AffixNames);
 
@@ -339,7 +338,6 @@ fn render_msw(ctx: &PluginContext<'_>, msw_cfg: &MswOptions) -> Result<String> {
             let status_num: u16 = code.parse().unwrap_or(200);
             let type_name = names.response(code);
             if !is_status_code(code) {
-                // `default`: the caller picks the status.
                 let _ = writeln!(
                     out,
                     "  {code}: (data: {type_name}, status = 500) => HttpResponse.json(data, {{ status }}),"

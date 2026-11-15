@@ -16,7 +16,6 @@ pub fn file_header(banner: &str) -> String {
     )
 }
 
-/// Writes each file under `output_dir` with `header` above its contents.
 pub fn write_outputs(
     output_dir: &Path,
     clean: bool,

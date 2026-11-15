@@ -115,7 +115,6 @@ pub struct AffixNames {
 }
 
 impl AffixNames {
-    /// `context` names where the overrides come from, for errors.
     pub fn new(
         rule: AffixNamingRule,
         kind: OverrideKind,
@@ -129,7 +128,6 @@ impl AffixNames {
         })
     }
 
-    /// The rule for `name`, after every override that matches it.
     pub fn rule_for(&self, name: &str) -> AffixNamingRule {
         self.overrides
             .matching(self.kind, name)
