@@ -1433,3 +1433,51 @@ components:
         "{factories}"
     );
 }
+
+const WRITE_ONLY_SPEC: &str = r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /secrets:
+    post:
+      operationId: createSecret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                public_id: { type: string }
+                password: { type: string, writeOnly: true }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  public_id: { type: string }
+                  password: { type: string, writeOnly: true }
+"#;
+
+fn factory_body<'a>(factories: &'a str, name: &str) -> &'a str {
+    let start = factories
+        .find(&format!("export function {name}("))
+        .unwrap_or_else(|| panic!("no {name} in\n{factories}"));
+    let len = factories[start..].find("\n}\n").unwrap();
+    &factories[start..start + len]
+}
+
+#[test]
+fn response_factories_leave_out_write_only_properties_and_request_factories_keep_them() {
+    let dir = generate_inline(WRITE_ONLY_SPEC, "[plugins.factories]\nenabled = true\n");
+    let factories = std::fs::read_to_string(dir.path().join("generated/factories.ts")).unwrap();
+
+    let response = factory_body(&factories, "createCreateSecret201");
+    assert!(response.contains("public_id:"), "{response}");
+    assert!(!response.contains("password"), "{response}");
+    let request = factory_body(&factories, "createCreateSecretMutationRequest");
+    assert!(request.contains("password:"), "{request}");
+}

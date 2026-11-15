@@ -200,7 +200,8 @@ fn render_factories(ctx: &PluginContext<'_>, cfg: &FactoriesOptions) -> Result<S
         for (status_code, schema) in &operation.responses {
             let type_name = names.response(status_code);
             let factory = factory_names.name(&type_name);
-            write_schema_factory(&mut out, &factory, &type_name, None, schema, &write_ctx)?;
+            let schema = schema.without_write_only();
+            write_schema_factory(&mut out, &factory, &type_name, None, &schema, &write_ctx)?;
             out.push('\n');
         }
         if let (Some(type_name), Some(status_code)) =

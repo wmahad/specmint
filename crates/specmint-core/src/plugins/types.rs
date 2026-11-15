@@ -385,83 +385,18 @@ fn write_response_type(
         write_string_enum(out, &error_code_name, &values, naming)?;
         out.push('\n');
         let rewritten = rewrite_error_code_refs(schema, &error_code_name);
-        let rewritten = omit_writeonly_fields(&rewritten);
+        let rewritten = rewritten.without_write_only();
         let ts = schema_to_ts(&rewritten, naming, false, schemas)?;
         let _ = writeln!(out, "export type {type_name} = {ts};");
         out.push('\n');
         return Ok(());
     }
 
-    let schema = omit_writeonly_fields(schema);
+    let schema = schema.without_write_only();
     let ts = schema_to_ts(&schema, naming, false, schemas)?;
     let _ = writeln!(out, "export type {type_name} = {ts};");
     out.push('\n');
     Ok(())
-}
-
-/// Drop `writeOnly` props from inlined response shapes (Kubb keysToOmit). Named
-/// `$ref` aliases are left alone so Create/Input component types keep write fields.
-fn omit_writeonly_fields(schema: &SchemaNode) -> SchemaNode {
-    match schema {
-        SchemaNode::Object {
-            properties,
-            required,
-            readonly_properties,
-            writeonly_properties,
-            additional_properties,
-            nullable,
-            description,
-        } => {
-            let properties: indexmap::IndexMap<_, _> = properties
-                .iter()
-                .filter(|(name, _)| !writeonly_properties.iter().any(|w| w == *name))
-                .map(|(k, v)| (k.clone(), omit_writeonly_fields(v)))
-                .collect();
-            let required: Vec<_> = required
-                .iter()
-                .filter(|name| !writeonly_properties.iter().any(|w| w == *name))
-                .cloned()
-                .collect();
-            SchemaNode::Object {
-                properties,
-                required,
-                readonly_properties: readonly_properties.clone(),
-                writeonly_properties: vec![],
-                additional_properties: additional_properties
-                    .as_ref()
-                    .map(|a| Box::new(omit_writeonly_fields(a))),
-                nullable: *nullable,
-                description: description.clone(),
-            }
-        }
-        SchemaNode::Array {
-            items,
-            nullable,
-            description,
-        } => SchemaNode::Array {
-            items: Box::new(omit_writeonly_fields(items)),
-            nullable: *nullable,
-            description: description.clone(),
-        },
-        SchemaNode::AllOf { items, nullable } => SchemaNode::AllOf {
-            items: items.iter().map(omit_writeonly_fields).collect(),
-            nullable: *nullable,
-        },
-        SchemaNode::OneOf {
-            items,
-            nullable,
-            discriminator,
-        } => SchemaNode::OneOf {
-            items: items.iter().map(omit_writeonly_fields).collect(),
-            nullable: *nullable,
-            discriminator: discriminator.clone(),
-        },
-        SchemaNode::AnyOf { items, nullable } => SchemaNode::AnyOf {
-            items: items.iter().map(omit_writeonly_fields).collect(),
-            nullable: *nullable,
-        },
-        other => other.clone(),
-    }
 }
 
 fn write_string_enum(
