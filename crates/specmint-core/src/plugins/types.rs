@@ -139,7 +139,11 @@ impl TypesOptions {
         Ok(TypeStyles {
             enum_style: self.enum_style,
             syntax: self.syntax,
-            overrides: OverrideSet::new(self.overrides.clone(), "plugins.types.overrides")?,
+            overrides: OverrideSet::for_kind(
+                self.overrides.clone(),
+                OverrideKind::SchemaName,
+                "plugins.types.overrides",
+            )?,
         })
     }
 

@@ -424,6 +424,15 @@ pub enum OverrideKind {
     OperationId,
 }
 
+impl OverrideKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SchemaName => "schema_name",
+            Self::OperationId => "operation_id",
+        }
+    }
+}
+
 /// The `plugins` table: one section per plugin, keyed by plugin name.
 ///
 /// Core does not know what a section holds. Each plugin reads its own with

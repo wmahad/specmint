@@ -56,6 +56,18 @@ impl<O: Override> OverrideSet<O> {
         Ok(Self { entries })
     }
 
+    /// Like [`OverrideSet::new`], but rejects overrides of any other kind, which would never apply.
+    pub fn for_kind(overrides: Vec<O>, kind: OverrideKind, context: &str) -> Result<Self> {
+        if let Some(other) = overrides.iter().find(|ovr| ovr.target().kind != kind) {
+            return Err(Error::config(format!(
+                "{context}: `kind = \"{}\"` never applies here; these overrides match `kind = \"{}\"`",
+                other.target().kind.as_str(),
+                kind.as_str()
+            )));
+        }
+        Self::new(overrides, context)
+    }
+
     /// The overrides of `kind` whose pattern matches `name`, in config order.
     pub fn matching<'a>(
         &'a self,
@@ -113,7 +125,7 @@ impl AffixNames {
         Ok(Self {
             rule,
             kind,
-            overrides: OverrideSet::new(overrides, context)?,
+            overrides: OverrideSet::for_kind(overrides, kind, context)?,
         })
     }
 
