@@ -10,10 +10,7 @@ use crate::config::{AffixNamingPatch, AffixNamingRule, CaseStyle, Config};
 use crate::error::Result;
 use crate::naming::{Naming, apply_affix_rule};
 use crate::plugin::{OutputFile, Plugin, PluginContext};
-use crate::plugins::cycles::{
-    CycleKind, RefGraph, build_ref_graph, find_circular_names, property_cycle_kind,
-};
-use crate::plugins::faker_expr::SchemaMap;
+use crate::plugins::cycles::{CycleKind, Cycles};
 
 pub struct ZodPlugin;
 
@@ -99,16 +96,13 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<St
     let _ = writeln!(out, "import {{ z }} from 'zod';");
     out.push('\n');
 
-    let graph = build_ref_graph(&spec.schemas);
-    let circular = find_circular_names(&graph);
+    let cycles = Cycles::new(&spec.schemas);
     for (name, schema) in &spec.schemas {
         let zod_name = zod.schema_name(&naming.schema_type_name(name));
         let ctx = ZodCtx {
             naming,
             zod,
-            schemas: &spec.schemas,
-            graph: &graph,
-            circular: &circular,
+            cycles: &cycles,
             component: name,
             direct_refs: false,
         };
@@ -131,9 +125,7 @@ fn render_zod(spec: &ParsedSpec, naming: &Naming, zod: &ZodOptions) -> Result<St
 struct ZodCtx<'a> {
     naming: &'a Naming,
     zod: &'a ZodOptions,
-    schemas: &'a SchemaMap,
-    graph: &'a RefGraph,
-    circular: &'a indexmap::IndexSet<String>,
+    cycles: &'a Cycles<'a>,
     component: &'a str,
     /// Inside a getter, refs need no `z.lazy`: the getter already defers them.
     direct_refs: bool,
@@ -239,13 +231,8 @@ fn schema_to_zod(schema: &SchemaNode, ctx: ZodCtx<'_>) -> Result<String> {
             for (prop, prop_schema) in properties {
                 // A `z.lazy` that closes a cycle leaves TypeScript inferring `any`
                 // (TS7022); a getter is Zod 4's typed way to recurse.
-                let in_cycle = property_cycle_kind(
-                    ctx.component,
-                    prop_schema,
-                    ctx.schemas,
-                    ctx.graph,
-                    ctx.circular,
-                ) != CycleKind::None;
+                let in_cycle =
+                    ctx.cycles.property_kind(ctx.component, prop_schema) != CycleKind::None;
                 let field_ctx = ZodCtx {
                     direct_refs: ctx.direct_refs || in_cycle,
                     ..ctx

@@ -6,10 +6,12 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+pub type SchemaMap = IndexMap<String, SchemaNode>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedSpec {
     pub meta: SpecMeta,
-    pub schemas: IndexMap<String, SchemaNode>,
+    pub schemas: SchemaMap,
     pub operations: Vec<OperationNode>,
 }
 

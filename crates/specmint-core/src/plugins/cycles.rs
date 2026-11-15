@@ -10,8 +10,7 @@ use indexmap::{IndexMap, IndexSet};
 use petgraph::algo::{has_path_connecting, tarjan_scc};
 use petgraph::graphmap::DiGraphMap;
 
-use crate::adapter::SchemaNode;
-use crate::plugins::faker_expr::SchemaMap;
+use crate::adapter::{SchemaMap, SchemaNode};
 
 pub type RefGraph = IndexMap<String, IndexSet<String>>;
 
@@ -120,8 +119,32 @@ pub fn resolve_ref_name<'a>(name: &'a str, schemas: &'a SchemaMap) -> &'a str {
     current
 }
 
-/// How `prop_schema` should be emitted inside factory `root`.
-pub fn property_cycle_kind(
+/// A spec's schema ref graph and the schemas that sit on a cycle.
+#[derive(Debug)]
+pub struct Cycles<'a> {
+    schemas: &'a SchemaMap,
+    graph: RefGraph,
+    circular: IndexSet<String>,
+}
+
+impl<'a> Cycles<'a> {
+    pub fn new(schemas: &'a SchemaMap) -> Self {
+        let graph = build_ref_graph(schemas);
+        let circular = find_circular_names(&graph);
+        Self {
+            schemas,
+            graph,
+            circular,
+        }
+    }
+
+    /// Whether `prop_schema`, a property of component `root`, leads back to `root`.
+    pub fn property_kind(&self, root: &str, prop_schema: &SchemaNode) -> CycleKind {
+        property_cycle_kind(root, prop_schema, self.schemas, &self.graph, &self.circular)
+    }
+}
+
+fn property_cycle_kind(
     root: &str,
     prop_schema: &SchemaNode,
     schemas: &SchemaMap,
@@ -188,36 +211,28 @@ mod tests {
         let mut schemas = SchemaMap::new();
         schemas.insert("A".into(), obj_with_ref("b", "B"));
         schemas.insert("B".into(), obj_with_ref("a", "A"));
-        let graph = build_ref_graph(&schemas);
-        let circular = find_circular_names(&graph);
-        assert!(circular.contains("A"));
-        assert!(circular.contains("B"));
+        let cycles = Cycles::new(&schemas);
+        assert!(cycles.circular.contains("A"));
+        assert!(cycles.circular.contains("B"));
         // Property `b` on A
         let b_prop = match schemas.get("A").unwrap() {
             SchemaNode::Object { properties, .. } => properties.get("b").unwrap(),
             _ => panic!(),
         };
-        assert_eq!(
-            property_cycle_kind("A", b_prop, &schemas, &graph, &circular),
-            CycleKind::Mutual
-        );
+        assert_eq!(cycles.property_kind("A", b_prop), CycleKind::Mutual);
     }
 
     #[test]
     fn detects_self_ref() {
         let mut schemas = SchemaMap::new();
         schemas.insert("Node".into(), obj_with_ref("child", "Node"));
-        let graph = build_ref_graph(&schemas);
-        let circular = find_circular_names(&graph);
-        assert!(circular.contains("Node"));
+        let cycles = Cycles::new(&schemas);
+        assert!(cycles.circular.contains("Node"));
         let child = match schemas.get("Node").unwrap() {
             SchemaNode::Object { properties, .. } => properties.get("child").unwrap(),
             _ => panic!(),
         };
-        assert_eq!(
-            property_cycle_kind("Node", child, &schemas, &graph, &circular),
-            CycleKind::SelfRef
-        );
+        assert_eq!(cycles.property_kind("Node", child), CycleKind::SelfRef);
     }
 
     #[test]
@@ -237,16 +252,12 @@ mod tests {
                 description: None,
             },
         );
-        let graph = build_ref_graph(&schemas);
-        let circular = find_circular_names(&graph);
-        assert!(circular.is_empty());
+        let cycles = Cycles::new(&schemas);
+        assert!(cycles.circular.is_empty());
         let product = match schemas.get("Org").unwrap() {
             SchemaNode::Object { properties, .. } => properties.get("product").unwrap(),
             _ => panic!(),
         };
-        assert_eq!(
-            property_cycle_kind("Org", product, &schemas, &graph, &circular),
-            CycleKind::None
-        );
+        assert_eq!(cycles.property_kind("Org", product), CycleKind::None);
     }
 }

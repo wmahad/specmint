@@ -10,13 +10,9 @@
 //! Cycles: schema ref-graph driven (not numeric depth). Self-refs → `undefined`;
 //! mutual cycles → lazy getters — same idea as Kubb plugin-faker.
 
-use indexmap::{IndexMap, IndexSet};
-
-use crate::adapter::{EnumValue, PrimitiveKind, SchemaNode};
+use crate::adapter::{EnumValue, PrimitiveKind, SchemaMap, SchemaNode};
 use crate::naming::Naming;
-use crate::plugins::cycles::{
-    CycleKind, RefGraph, property_cycle_kind, resolve_ref_name, schema_is_array,
-};
+use crate::plugins::cycles::{CycleKind, Cycles, resolve_ref_name, schema_is_array};
 use crate::plugins::factories::FactoryNames;
 
 /// Context for nested factory expression generation.
@@ -24,28 +20,23 @@ use crate::plugins::factories::FactoryNames;
 pub struct FakerCtx<'a> {
     /// OAS schema name of the factory currently being emitted (cycle root).
     pub root_schema: Option<&'a str>,
-    pub graph: &'a RefGraph,
-    pub circular: &'a IndexSet<String>,
+    pub cycles: &'a Cycles<'a>,
     pub factory_names: &'a FactoryNames,
 }
 
 impl<'a> FakerCtx<'a> {
     pub fn for_schema(
         root_schema: Option<&'a str>,
-        graph: &'a RefGraph,
-        circular: &'a IndexSet<String>,
+        cycles: &'a Cycles<'a>,
         factory_names: &'a FactoryNames,
     ) -> Self {
         Self {
             root_schema,
-            graph,
-            circular,
+            cycles,
             factory_names,
         }
     }
 }
-
-pub type SchemaMap = IndexMap<String, SchemaNode>;
 
 /// Expression that builds a value for `schema` (no overrides applied).
 pub fn faker_expr(
@@ -147,7 +138,7 @@ fn object_property_entry(
 ) -> String {
     let key = faker_property_key(prop);
     let kind = match ctx.root_schema {
-        Some(root) => property_cycle_kind(root, prop_schema, schemas, ctx.graph, ctx.circular),
+        Some(root) => ctx.cycles.property_kind(root, prop_schema),
         None => CycleKind::None,
     };
 
