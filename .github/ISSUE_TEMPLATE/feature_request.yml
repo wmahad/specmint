@@ -1,0 +1,22 @@
+name: Feature request
+description: Ask for an option, a plugin feature or a kubb feature specmint lacks.
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The problem, not the solution. What do you need the generated code to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed config or output
+      description: How you would like to switch it on, and what the generated code would look like.
+  - type: input
+    id: kubb
+    attributes:
+      label: kubb equivalent
+      description: If kubb has this, the plugin and option name.
+      placeholder: "@kubb/plugin-faker: locale"

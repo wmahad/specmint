@@ -1,0 +1,38 @@
+name: Bug report
+description: Something specmint generates or does is wrong.
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: Your specmint config file, with secrets removed.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: Smallest spec that shows the problem
+      description: A cut-down OpenAPI document, or a link to a public one.
+      render: yaml
+  - type: textarea
+    id: output
+    attributes:
+      label: Generated output or error
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: specmint version, Node version and operating system.
+      placeholder: specmint 0.1.0, Node 22.18.0, macOS 15 (arm64)
+    validations:
+      required: true
