@@ -47,7 +47,7 @@
   "devDependencies": {
     "@napi-rs/cli": "^3.10.8",
     "crate-specmint-napi": "workspace:*",
-    "oxlint": "^1.93.0"
+    "oxlint": "^1.94.0"
   },
   "napi": {
     "binaryName": "specmint"
